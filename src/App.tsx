@@ -21,64 +21,21 @@ function App() {
     lastSyncResult,
   } = useLibrary();
 
-  // Handle opening a file
-  const addRecentFile = useCallback(
-    (name: string, path: string) => {
-      // Update the item's lastOpened timestamp
+  // Handle opening a file from the library - just open it for reading, don't add to library
+  const handleOpenRecentFile = useCallback(
+    (path: string) => {
+      setCurrentFilePath(path);
+      setCurrentFile(null);
+      // Update the item's lastOpened timestamp if it exists in the library
       const existingItem = libraryItems.find((item) => item.path === path);
       if (existingItem) {
         updateItem(existingItem.id, {
           lastOpened: new Date().toISOString(),
         });
-      } else {
-        // Import the single file
-        const scannedFile: ScannedFile = {
-          name,
-          path,
-          size: 0,
-        };
-        importFiles([scannedFile]);
       }
-    },
-    [libraryItems, updateItem, importFiles]
-  );
-
-  const handleOpenFile = useCallback(async () => {
-    try {
-      // Use Tauri's dialog to open file
-      const { open: openDialog } = await import('@tauri-apps/plugin-dialog');
-      const selected = await openDialog({
-        multiple: false,
-        filters: [
-          {
-            name: 'PDF',
-            extensions: ['pdf'],
-          },
-        ],
-      });
-
-      if (selected) {
-        const filePath = selected as string;
-        setCurrentFilePath(filePath);
-        setCurrentFile(null);
-        const fileName = filePath.split('/').pop() || 'document.pdf';
-        addRecentFile(fileName, filePath);
-        setActiveView('reader');
-      }
-    } catch (err) {
-      console.error('Error opening file dialog:', err);
-    }
-  }, [addRecentFile]);
-
-  const handleOpenRecentFile = useCallback(
-    (path: string) => {
-      setCurrentFilePath(path);
-      setCurrentFile(null);
-      const name = path.split('/').pop() || 'document.pdf';
-      addRecentFile(name, path);
       setActiveView('reader');
     },
-    [addRecentFile]
+    [libraryItems, updateItem]
   );
 
   const handleCloseViewer = useCallback(() => {
@@ -115,7 +72,6 @@ function App() {
   return (
     <div className="flex h-screen bg-[#f6f7f8] dark:bg-background-dark">
       <Sidebar
-        onOpenFile={handleOpenFile}
         onImportFolder={handleImportFolder}
         activeView={activeView}
         onViewChange={setActiveView}
@@ -123,7 +79,6 @@ function App() {
 
       {activeView === 'library' ? (
         <LibraryView
-          onOpenFile={handleOpenFile}
           onOpenRecentFile={handleOpenRecentFile}
           items={libraryItems}
           onImportFiles={handleImportFiles}

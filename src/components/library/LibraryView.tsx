@@ -7,7 +7,6 @@ import { ImportResult } from './ImportResult';
 import type { LibraryItem, ImportResult as ImportResultType, ImportProgress as ImportProgressType, ScannedFile } from '../../types/library';
 
 interface LibraryViewProps {
-  onOpenFile: () => void;
   onOpenRecentFile: (path: string) => void;
   items: LibraryItem[];
   onImportFiles: (files: ScannedFile[]) => Promise<ImportResultType>;
@@ -18,7 +17,6 @@ interface LibraryViewProps {
 }
 
 export function LibraryView({
-  onOpenFile,
   onOpenRecentFile,
   items,
   onImportFiles,
@@ -181,23 +179,15 @@ export function LibraryView({
               No PDF files yet
             </h2>
             <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
-              Open a PDF file or import a folder to get started.
+              Import a folder to get started with your PDF library.
             </p>
-            <div className="flex gap-3">
-              <button
-                onClick={onOpenFile}
-                className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium"
-              >
-                Open PDF File
-              </button>
-              <button
-                onClick={() => setShowImportModal(true)}
-                className="px-6 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl transition-colors font-medium flex items-center gap-2"
-              >
-                <FolderPlus className="w-4 h-4" />
-                Import Folder
-              </button>
-            </div>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium flex items-center gap-2"
+            >
+              <FolderPlus className="w-4 h-4" />
+              Import Folder
+            </button>
           </div>
         ) : showFavorites && favoriteItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">

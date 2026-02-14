@@ -1,14 +1,13 @@
-import { FileText, FolderOpen, FolderPlus, Clock, Star, Settings, Moon, Sun } from 'lucide-react';
+import { FileText, FolderPlus, Clock, Star, Settings, Moon, Sun } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 
 interface SidebarProps {
-  onOpenFile: () => void;
   onImportFolder?: () => void;
   activeView: 'library' | 'reader';
   onViewChange: (view: 'library' | 'reader') => void;
 }
 
-export function Sidebar({ onOpenFile, onImportFolder, activeView, onViewChange }: SidebarProps) {
+export function Sidebar({ onImportFolder, activeView, onViewChange }: SidebarProps) {
   const { theme, toggleTheme } = useTheme();
 
   return (
@@ -23,20 +22,12 @@ export function Sidebar({ onOpenFile, onImportFolder, activeView, onViewChange }
         </span>
       </div>
 
-      {/* Open File Button */}
-      <div className="p-2 lg:p-3 space-y-2">
-        <button
-          onClick={onOpenFile}
-          className="w-full flex items-center justify-center lg:justify-start gap-2 px-3 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium text-sm"
-        >
-          <FolderOpen className="w-4 h-4" />
-          <span className="hidden lg:block">Open File</span>
-        </button>
-
+      {/* Import Folder Button */}
+      <div className="p-2 lg:p-3">
         {onImportFolder && (
           <button
             onClick={onImportFolder}
-            className="w-full flex items-center justify-center lg:justify-start gap-2 px-3 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl transition-colors font-medium text-sm"
+            className="w-full flex items-center justify-center lg:justify-start gap-2 px-3 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium text-sm"
           >
             <FolderPlus className="w-4 h-4" />
             <span className="hidden lg:block">Import Folder</span>
