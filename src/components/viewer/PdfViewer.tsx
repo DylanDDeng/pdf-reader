@@ -1,11 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { loadPdfDocument, renderPage } from '../../utils/pdf';
+import { loadPdfDocument, renderPage, extractOutline, type OutlineItem } from '../../utils/pdf';
 
 interface PdfViewerProps {
   file: File | string;
   currentPage: number;
   scale: number;
-  onDocumentLoad: (totalPages: number) => void;
+  onDocumentLoad: (totalPages: number, outline: OutlineItem[]) => void;
 }
 
 export function PdfViewer({
@@ -22,27 +22,16 @@ export function PdfViewer({
   const [isLoading, setIsLoading] = useState(true);
 
   const renderCurrentPage = useCallback(async () => {
-    console.log('[DEBUG] renderCurrentPage called:', {
-      hasDocument: !!documentRef.current,
-      hasCanvas: !!canvasRef.current,
-      currentPage,
-      scale,
-    });
-
     if (!documentRef.current || !canvasRef.current) {
-      console.log('[DEBUG] Skipping render - missing document or canvas');
       return;
     }
 
     try {
-      console.log('[DEBUG] Getting page', currentPage);
       const page = await documentRef.current.getPage(currentPage);
       pageRef.current = page;
-      console.log('[DEBUG] Page obtained, calling renderPage');
       await renderPage(page, canvasRef.current, scale);
-      console.log('[DEBUG] renderPage completed');
     } catch (err) {
-      console.error('[DEBUG] Error in renderCurrentPage:', err);
+      console.error('Error rendering page:', err);
     }
   }, [currentPage, scale]);
 
@@ -57,39 +46,31 @@ export function PdfViewer({
         let source: ArrayBuffer;
 
         if (typeof file === 'string') {
-          console.log('[DEBUG] Loading from file path:', file);
-          // Use Tauri fs plugin to read the file
           const { readFile } = await import('@tauri-apps/plugin-fs');
           const contents = await readFile(file);
-          // Convert Uint8Array to ArrayBuffer - use a new ArrayBuffer to ensure compatibility
           source = new Uint8Array(contents).buffer as ArrayBuffer;
-          console.log('[DEBUG] File loaded, byteLength:', source.byteLength);
         } else {
-          console.log('[DEBUG] Loading from File object');
           source = await file.arrayBuffer();
-          console.log('[DEBUG] File loaded, byteLength:', source.byteLength);
         }
 
-        console.log('[DEBUG] Calling loadPdfDocument...');
         const doc = await loadPdfDocument(source);
-        console.log('[DEBUG] Document loaded, numPages:', doc.numPages);
 
         if (isMounted) {
           documentRef.current = doc;
-          onDocumentLoad(doc.numPages);
+          
+          // Extract outline from PDF
+          const outline = await extractOutline(doc);
+          onDocumentLoad(doc.numPages, outline);
 
           if (canvasRef.current) {
-            console.log('[DEBUG] Rendering first page after document load...');
             const page = await doc.getPage(1);
             await renderPage(page, canvasRef.current, scale);
           }
         }
       } catch (err) {
-        console.error('[DEBUG] Error loading PDF:', err);
+        console.error('Error loading PDF:', err);
         if (isMounted) {
-          const errorMessage = err instanceof Error
-            ? `${err.message}`
-            : String(err);
+          const errorMessage = err instanceof Error ? err.message : String(err);
           setError(`Failed to load PDF: ${errorMessage}`);
         }
       } finally {
@@ -118,25 +99,42 @@ export function PdfViewer({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-auto bg-slate-100 dark:bg-slate-900 flex items-start justify-center p-8"
+      className="flex-1 overflow-auto bg-[#eef0f2] relative flex justify-center p-8"
     >
-      {isLoading && (
-        <div className="flex items-center justify-center h-full w-full">
-          <div className="text-slate-500 dark:text-slate-400">Loading...</div>
+      {/* PDF Page Container */}
+      <div className="relative">
+        {/* Page Card */}
+        <div className="bg-white rounded-lg shadow-xl overflow-hidden">
+          {isLoading && (
+            <div className="flex items-center justify-center w-[612px] h-[792px]">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
+                <span className="text-sm text-slate-400">Loading...</span>
+              </div>
+            </div>
+          )}
+          {error && (
+            <div className="flex items-center justify-center w-[612px] h-[792px] p-8">
+              <div className="text-red-500 text-center">
+                <p className="font-medium mb-1">Error</p>
+                <p className="text-sm text-red-400">{error}</p>
+              </div>
+            </div>
+          )}
+          <canvas
+            ref={canvasRef}
+            className="block"
+            style={{
+              display: isLoading || error ? 'none' : 'block',
+            }}
+          />
         </div>
-      )}
-      {error && (
-        <div className="flex items-center justify-center h-full w-full">
-          <div className="text-red-500 dark:text-red-400">{error}</div>
+
+        {/* Page Number Indicator - Top Right */}
+        <div className="absolute -top-6 right-0 text-xs text-slate-400 font-medium">
+          {currentPage.toString().padStart(2, '0')}
         </div>
-      )}
-      <canvas
-        ref={canvasRef}
-        className="shadow-xl bg-white"
-        style={{
-          display: isLoading || error ? 'none' : 'block'
-        }}
-      />
+      </div>
     </div>
   );
 }
