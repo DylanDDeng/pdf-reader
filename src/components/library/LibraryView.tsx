@@ -12,7 +12,9 @@ interface LibraryViewProps {
   items: LibraryItem[];
   onImportFiles: (files: ScannedFile[]) => Promise<ImportResultType>;
   onToggleFavorite: (itemId: string) => void;
+  onRemoveItem: (itemId: string) => void;
   importProgress: ImportProgressType | null;
+  lastSyncResult?: { removedCount: number } | null;
 }
 
 export function LibraryView({
@@ -21,7 +23,9 @@ export function LibraryView({
   items,
   onImportFiles,
   onToggleFavorite,
+  onRemoveItem,
   importProgress,
+  lastSyncResult,
 }: LibraryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -143,6 +147,18 @@ export function LibraryView({
 
       {/* Content */}
       <main className="flex-1 overflow-auto p-6">
+        {/* Sync Notification */}
+        {lastSyncResult && lastSyncResult.removedCount > 0 && (
+          <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-2 text-sm text-amber-800 dark:text-amber-200">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>
+              Cleaned up {lastSyncResult.removedCount} file{lastSyncResult.removedCount !== 1 ? 's' : ''} that no longer exist on disk.
+            </span>
+          </div>
+        )}
+
         {/* Empty State */}
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -242,6 +258,7 @@ export function LibraryView({
                       onClick={() => onOpenRecentFile(item.path)}
                       isFavorite={true}
                       onToggleFavorite={() => onToggleFavorite(item.id)}
+                      onRemove={() => onRemoveItem(item.id)}
                     />
                   ))}
                 </div>
@@ -291,6 +308,7 @@ export function LibraryView({
                       onClick={() => onOpenRecentFile(item.path)}
                       isFavorite={item.favorite}
                       onToggleFavorite={() => onToggleFavorite(item.id)}
+                      onRemove={() => onRemoveItem(item.id)}
                       metadata={item.metadata}
                     />
                   ))}

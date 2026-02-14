@@ -212,6 +212,17 @@ fn get_file_metadata(file_path: String) -> Result<FileMetadata, String> {
     })
 }
 
+#[tauri::command]
+fn verify_files_exist(file_paths: Vec<String>) -> Vec<(String, bool)> {
+    file_paths
+        .iter()
+        .map(|path| {
+            let exists = Path::new(path).exists();
+            (path.clone(), exists)
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
     pub name: String,
@@ -236,7 +247,8 @@ pub fn run() {
             scan_directory_for_pdfs,
             start_watch_folder,
             stop_watch_folder,
-            get_file_metadata
+            get_file_metadata,
+            verify_files_exist
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

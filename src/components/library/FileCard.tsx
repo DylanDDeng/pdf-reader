@@ -1,4 +1,5 @@
-import { FileText, Clock, Star } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, Clock, Star, Trash2 } from 'lucide-react';
 import type { PdfMetadata } from '../../types/library';
 
 interface FileCardProps {
@@ -7,6 +8,7 @@ interface FileCardProps {
   onClick: () => void;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
+  onRemove?: () => void;
   metadata?: PdfMetadata;
   viewMode?: 'grid' | 'list';
 }
@@ -17,13 +19,34 @@ export function FileCard({
   onClick,
   isFavorite = false,
   onToggleFavorite,
+  onRemove,
   metadata,
   viewMode = 'grid',
 }: FileCardProps) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   // Format file size helper
   const formatPageCount = (count?: number) => {
     if (!count) return null;
     return `${count} page${count !== 1 ? 's' : ''}`;
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onRemove) {
+      onRemove();
+    }
+    setShowDeleteConfirm(false);
+  };
+
+  const handleCancelDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowDeleteConfirm(false);
   };
 
   if (viewMode === 'list') {
@@ -73,6 +96,35 @@ export function FileCard({
             <Star className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
           </button>
         )}
+
+        {/* Delete Button */}
+        {onRemove && !showDeleteConfirm && (
+          <button
+            onClick={handleDeleteClick}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-colors flex-shrink-0"
+            title="Remove from library"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Delete Confirmation */}
+        {showDeleteConfirm && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              onClick={handleConfirmDelete}
+              className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={handleCancelDelete}
+              className="px-2 py-1 text-xs bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 rounded hover:bg-slate-300 dark:hover:bg-slate-500 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -82,22 +134,54 @@ export function FileCard({
       onClick={onClick}
       className="bg-white dark:bg-slate-800 rounded-xl p-4 cursor-pointer hover:shadow-lg hover:shadow-slate-200/50 dark:hover:shadow-slate-900/50 transition-all duration-200 border border-slate-200 dark:border-slate-700 group relative"
     >
-      {/* Favorite Button */}
-      {onToggleFavorite && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFavorite();
-          }}
-          className={`absolute top-2 right-2 p-1.5 rounded-lg transition-colors z-10 ${
-            isFavorite
-              ? 'text-amber-500 hover:text-amber-600 bg-white/80 dark:bg-slate-800/80'
-              : 'text-slate-300 hover:text-amber-500 opacity-0 group-hover:opacity-100 hover:bg-white/80 dark:hover:bg-slate-800/80'
-          }`}
-        >
-          <Star className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-        </button>
-      )}
+      {/* Action Buttons */}
+      <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+        {/* Favorite Button */}
+        {onToggleFavorite && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
+            className={`p-1.5 rounded-lg transition-colors ${
+              isFavorite
+                ? 'text-amber-500 hover:text-amber-600 bg-white/80 dark:bg-slate-800/80'
+                : 'text-slate-300 hover:text-amber-500 opacity-0 group-hover:opacity-100 hover:bg-white/80 dark:hover:bg-slate-800/80'
+            }`}
+          >
+            <Star className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+          </button>
+        )}
+
+        {/* Delete Button */}
+        {onRemove && !showDeleteConfirm && (
+          <button
+            onClick={handleDeleteClick}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-colors bg-white/80 dark:bg-slate-800/80 hover:bg-white/80 dark:hover:bg-slate-800/80"
+            title="Remove from library"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Delete Confirmation */}
+        {showDeleteConfirm && (
+          <div className="flex items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg p-1">
+            <button
+              onClick={handleConfirmDelete}
+              className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={handleCancelDelete}
+              className="px-2 py-1 text-xs bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 rounded hover:bg-slate-300 dark:hover:bg-slate-500 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* PDF Icon */}
       <div className="w-full aspect-[3/4] bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center justify-center mb-3 group-hover:bg-red-100 dark:group-hover:bg-red-900/30 transition-colors">
@@ -105,7 +189,7 @@ export function FileCard({
       </div>
 
       {/* File Name */}
-      <h3 className="font-medium text-slate-800 dark:text-white text-sm truncate mb-1 pr-6">
+      <h3 className="font-medium text-slate-800 dark:text-white text-sm truncate mb-1 pr-16">
         {name}
       </h3>
 

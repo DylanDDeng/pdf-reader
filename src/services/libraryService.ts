@@ -349,3 +349,33 @@ export function sortLibrary(
 
   return sorted;
 }
+
+// Verify which files exist on disk and return valid items
+export async function verifyAndCleanLibrary(
+  items: LibraryItem[]
+): Promise<{ validItems: LibraryItem[]; removedCount: number }> {
+  if (items.length === 0) {
+    return { validItems: [], removedCount: 0 };
+  }
+
+  const paths = items.map((item) => item.path);
+
+  try {
+    const results = await invoke<[string, boolean][]>('verify_files_exist', {
+      filePaths: paths,
+    });
+
+    const validPaths = new Set(
+      results.filter(([_, exists]) => exists).map(([path]) => path)
+    );
+
+    const validItems = items.filter((item) => validPaths.has(item.path));
+    const removedCount = items.length - validItems.length;
+
+    return { validItems, removedCount };
+  } catch (error) {
+    console.error('Error verifying files:', error);
+    // On error, return all items unchanged
+    return { validItems: items, removedCount: 0 };
+  }
+}

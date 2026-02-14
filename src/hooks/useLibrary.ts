@@ -21,6 +21,8 @@ export interface UseLibraryReturn {
   watchedFolders: WatchedFolder[];
   isLoading: boolean;
   importProgress: ImportProgress | null;
+  isSyncing: boolean;
+  lastSyncResult: { removedCount: number } | null;
 
   // Actions
   scanDirectory: (path: string, recursive?: boolean) => Promise<ScanResult>;
@@ -32,6 +34,7 @@ export interface UseLibraryReturn {
   updateItem: (itemId: string, updates: Partial<LibraryItem>) => void;
   toggleFavorite: (itemId: string) => void;
   refreshLibrary: () => void;
+  syncLibrary: () => Promise<{ removedCount: number }>;
 }
 
 export function useLibrary(): UseLibraryReturn {
@@ -42,7 +45,34 @@ export function useLibrary(): UseLibraryReturn {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncResult, setLastSyncResult] = useState<{ removedCount: number } | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
+  const syncCompletedRef = useRef(false);
+
+  // Sync library - verify files exist and remove invalid entries
+  const syncLibrary = useCallback(async (): Promise<{ removedCount: number }> => {
+    setIsSyncing(true);
+    try {
+      const { validItems, removedCount } = await libraryService.verifyAndCleanLibrary(
+        state.items
+      );
+
+      if (removedCount > 0) {
+        const newState = { ...state, items: validItems };
+        libraryService.saveLibrary(newState);
+        setState(newState);
+        setLastSyncResult({ removedCount });
+      }
+
+      return { removedCount };
+    } catch (error) {
+      console.error('Error syncing library:', error);
+      return { removedCount: 0 };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [state]);
 
   // Load library on mount
   useEffect(() => {
@@ -77,6 +107,31 @@ export function useLibrary(): UseLibraryReturn {
       }
     };
   }, []);
+
+  // Auto-sync library on initial load
+  useEffect(() => {
+    if (!syncCompletedRef.current && state.items.length > 0) {
+      syncCompletedRef.current = true;
+
+      const autoSync = async () => {
+        const { validItems, removedCount } = await libraryService.verifyAndCleanLibrary(
+          state.items
+        );
+
+        if (removedCount > 0) {
+          const newState = { ...state, items: validItems };
+          libraryService.saveLibrary(newState);
+          setState(newState);
+          setLastSyncResult({ removedCount });
+
+          // Clear sync result after 5 seconds
+          setTimeout(() => setLastSyncResult(null), 5000);
+        }
+      };
+
+      autoSync();
+    }
+  }, [state.items.length]);
 
   // Handle folder change events
   const handleFolderChanged = useCallback(
@@ -297,6 +352,8 @@ export function useLibrary(): UseLibraryReturn {
     watchedFolders: state.watchedFolders,
     isLoading,
     importProgress,
+    isSyncing,
+    lastSyncResult,
     scanDirectory,
     importFiles,
     addWatchedFolder,
@@ -306,5 +363,6 @@ export function useLibrary(): UseLibraryReturn {
     updateItem,
     toggleFavorite,
     refreshLibrary,
+    syncLibrary,
   };
 }

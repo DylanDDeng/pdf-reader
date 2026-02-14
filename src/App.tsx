@@ -17,6 +17,8 @@ function App() {
     importFiles,
     updateItem,
     toggleFavorite,
+    removeItem,
+    lastSyncResult,
   } = useLibrary();
 
   // Handle opening a file
@@ -126,7 +128,9 @@ function App() {
           items={libraryItems}
           onImportFiles={handleImportFiles}
           onToggleFavorite={toggleFavorite}
+          onRemoveItem={removeItem}
           importProgress={importProgress}
+          lastSyncResult={lastSyncResult}
         />
       ) : (
         <Viewer
