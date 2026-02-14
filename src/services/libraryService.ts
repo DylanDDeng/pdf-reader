@@ -44,7 +44,7 @@ export async function scanDirectory(
 // Extract PDF metadata using pdfjs
 export async function extractMetadata(
   filePath: string
-): Promise<{ title?: string; author?: string; pageCount?: number }> {
+): Promise<{ title?: string; author?: string; pageCount?: number; thumbnail?: string }> {
   try {
     // Read file using Tauri's fs plugin
     const { readFile } = await import('@tauri-apps/plugin-fs');
@@ -57,11 +57,40 @@ export async function extractMetadata(
     const metadata = await pdf.getMetadata();
     const info = metadata.info as Record<string, unknown> | undefined;
 
-    return {
+    const result: { title?: string; author?: string; pageCount?: number; thumbnail?: string } = {
       title: (info?.Title as string) || undefined,
       author: (info?.Author as string) || undefined,
       pageCount: pdf.numPages,
     };
+
+    // Generate first page thumbnail
+    try {
+      const page = await pdf.getPage(1);
+      const canvas = document.createElement('canvas');
+
+      // Use smaller scale for thumbnail
+      const scale = 0.3;
+      const viewport = page.getViewport({ scale });
+
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      const context = canvas.getContext('2d');
+      if (context) {
+        await page.render({
+          canvasContext: context,
+          viewport,
+          canvas,
+        }).promise;
+
+        // Convert to base64 data URL (JPEG format to reduce size)
+        result.thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+      }
+    } catch (e) {
+      console.warn('Failed to generate thumbnail:', e);
+    }
+
+    return result;
   } catch (error) {
     console.error('Error extracting metadata:', error);
     return { pageCount: undefined };

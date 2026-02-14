@@ -11,6 +11,7 @@ interface FileCardProps {
   onRemove?: () => void;
   metadata?: PdfMetadata;
   viewMode?: 'grid' | 'list';
+  thumbnail?: string;
 }
 
 export function FileCard({
@@ -22,6 +23,7 @@ export function FileCard({
   onRemove,
   metadata,
   viewMode = 'grid',
+  thumbnail,
 }: FileCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -183,9 +185,17 @@ export function FileCard({
         )}
       </div>
 
-      {/* PDF Icon */}
-      <div className="w-full aspect-[3/4] bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center justify-center mb-3 group-hover:bg-red-100 dark:group-hover:bg-red-900/30 transition-colors">
-        <FileText className="w-12 h-12 text-red-500" />
+      {/* PDF Icon or Thumbnail */}
+      <div className="w-full aspect-[3/4] bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center justify-center mb-3 overflow-hidden group-hover:bg-red-100 dark:group-hover:bg-red-900/30 transition-colors">
+        {thumbnail ? (
+          <img
+            src={thumbnail}
+            alt={name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <FileText className="w-12 h-12 text-red-500" />
+        )}
       </div>
 
       {/* File Name */}

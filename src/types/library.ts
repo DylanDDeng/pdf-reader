@@ -10,6 +10,7 @@ export interface PdfMetadata {
   creator?: string;
   producer?: string;
   creationDate?: string;
+  thumbnail?: string; // base64 data URL for PDF first page thumbnail
 }
 
 export interface LibraryItem {

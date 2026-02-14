@@ -263,6 +263,8 @@ export function LibraryView({
                       isFavorite={true}
                       onToggleFavorite={() => onToggleFavorite(item.id)}
                       onRemove={() => onRemoveItem(item.id)}
+                      metadata={item.metadata}
+                      thumbnail={item.metadata?.thumbnail}
                     />
                   ))}
                 </div>
@@ -303,6 +305,7 @@ export function LibraryView({
                       onToggleFavorite={() => onToggleFavorite(item.id)}
                       onRemove={() => onRemoveItem(item.id)}
                       metadata={item.metadata}
+                      thumbnail={item.metadata?.thumbnail}
                     />
                   ))}
                 </div>
