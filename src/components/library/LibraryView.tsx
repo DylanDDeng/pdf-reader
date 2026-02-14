@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Search, Grid, List, FolderPlus, Star, Clock } from 'lucide-react';
 import { FileCard } from './FileCard';
 import { ImportModal } from './ImportModal';
@@ -34,11 +34,16 @@ export function LibraryView({
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultType | null>(null);
 
+  // Track previous triggerImport value to detect changes
+  const prevTriggerImportRef = useRef(triggerImport);
+
   // Listen for import trigger from sidebar
   useEffect(() => {
-    if (triggerImport && triggerImport > 0) {
+    // Only trigger if the value has changed (increased)
+    if (triggerImport !== prevTriggerImportRef.current && triggerImport && triggerImport > 0) {
       setShowImportModal(true);
     }
+    prevTriggerImportRef.current = triggerImport;
   }, [triggerImport]);
 
   // Filter items based on search and favorites
