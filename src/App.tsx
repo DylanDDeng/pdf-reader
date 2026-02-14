@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { LibraryView } from './components/library/LibraryView';
 import { Viewer } from './components/viewer/Viewer';
@@ -45,21 +45,13 @@ function App() {
   }, []);
 
   // Handle import folder from sidebar
-  const [showImportFromSidebar, setShowImportFromSidebar] = useState(false);
+  const [importTrigger, setImportTrigger] = useState(0);
 
   const handleImportFolder = useCallback(() => {
     setActiveView('library');
     // Trigger import modal in LibraryView
-    setShowImportFromSidebar(true);
+    setImportTrigger((prev) => prev + 1);
   }, []);
-
-  // Clear the import trigger after it's been handled
-  useEffect(() => {
-    if (showImportFromSidebar) {
-      const timer = setTimeout(() => setShowImportFromSidebar(false), 100);
-      return () => clearTimeout(timer);
-    }
-  }, [showImportFromSidebar]);
 
   // Handle importing files
   const handleImportFiles = useCallback(
@@ -86,6 +78,7 @@ function App() {
           onRemoveItem={removeItem}
           importProgress={importProgress}
           lastSyncResult={lastSyncResult}
+          triggerImport={importTrigger}
         />
       ) : (
         <Viewer

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Search, Grid, List, FolderPlus, Star, Clock } from 'lucide-react';
 import { FileCard } from './FileCard';
 import { ImportModal } from './ImportModal';
@@ -14,6 +14,7 @@ interface LibraryViewProps {
   onRemoveItem: (itemId: string) => void;
   importProgress: ImportProgressType | null;
   lastSyncResult?: { removedCount: number } | null;
+  triggerImport?: number;
 }
 
 export function LibraryView({
@@ -24,6 +25,7 @@ export function LibraryView({
   onRemoveItem,
   importProgress,
   lastSyncResult,
+  triggerImport,
 }: LibraryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -31,6 +33,13 @@ export function LibraryView({
   const [showImportModal, setShowImportModal] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultType | null>(null);
+
+  // Listen for import trigger from sidebar
+  useEffect(() => {
+    if (triggerImport && triggerImport > 0) {
+      setShowImportModal(true);
+    }
+  }, [triggerImport]);
 
   // Filter items based on search and favorites
   const filteredItems = items.filter((item) => {
@@ -257,25 +266,14 @@ export function LibraryView({
 
             {/* Recent Files Section */}
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-slate-400" />
-                  <h2 className="text-lg font-semibold text-slate-800 dark:text-white">
-                    {showFavorites ? 'Favorites' : 'Recent Files'}
-                  </h2>
-                  <span className="text-sm text-slate-400">
-                    {showFavorites ? favoriteItems.length : recentItems.length}
-                  </span>
-                </div>
-                {!showFavorites && (
-                  <button
-                    onClick={() => setShowImportModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-lg text-sm font-medium transition-colors"
-                  >
-                    <FolderPlus className="w-4 h-4" />
-                    Import Folder
-                  </button>
-                )}
+              <div className="flex items-center gap-2 mb-4">
+                <Clock className="w-5 h-5 text-slate-400" />
+                <h2 className="text-lg font-semibold text-slate-800 dark:text-white">
+                  {showFavorites ? 'Favorites' : 'Recent Files'}
+                </h2>
+                <span className="text-sm text-slate-400">
+                  {showFavorites ? favoriteItems.length : recentItems.length}
+                </span>
               </div>
 
               {(showFavorites ? favoriteItems : recentItems).length === 0 ? (
