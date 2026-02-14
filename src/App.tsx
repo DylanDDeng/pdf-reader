@@ -9,6 +9,7 @@ function App() {
   const [activeView, setActiveView] = useState<'library' | 'reader'>('library');
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Use the library hook for managing PDF library
   const {
@@ -68,6 +69,8 @@ function App() {
         onImportFolder={handleImportFolder}
         activeView={activeView}
         onViewChange={setActiveView}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
 
       {activeView === 'library' ? (

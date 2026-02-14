@@ -22,7 +22,7 @@ export function ReaderSidebar({
   );
 
   return (
-    <aside className="w-72 bg-[#f6f7f8] flex flex-col border-r border-slate-200">
+    <aside className="w-72 bg-[#f6f7f8] flex flex-col border-r border-slate-200 h-full">
       {/* Filter Input */}
       <div className="p-4">
         <div className="relative">
