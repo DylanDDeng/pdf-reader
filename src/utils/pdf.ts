@@ -74,24 +74,10 @@ export async function renderPage(
   const scaledHeight = Math.floor(viewport.height * outputScale);
   const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
 
-  console.log('[DEBUG] renderPage called:', {
-    scale,
-    outputScale,
-    viewportWidth: viewport.width,
-    viewportHeight: viewport.height,
-  });
-
   canvas.width = scaledWidth;
   canvas.height = scaledHeight;
   canvas.style.width = `${viewport.width}px`;
   canvas.style.height = `${viewport.height}px`;
-
-  console.log('[DEBUG] Canvas dimensions set:', {
-    canvasWidth: canvas.width,
-    canvasHeight: canvas.height,
-    cssWidth: canvas.style.width,
-    cssHeight: canvas.style.height,
-  });
 
   const renderContext = {
     canvas: canvas,
@@ -99,14 +85,23 @@ export async function renderPage(
     transform,
   };
 
-  console.log('[DEBUG] Starting page.render()...');
+  const renderTask = page.render(renderContext);
+  await renderTask.promise;
+}
 
-  try {
-    const renderTask = page.render(renderContext);
-    await renderTask.promise;
-    console.log('[DEBUG] page.render() completed successfully');
-  } catch (err) {
-    console.error('[DEBUG] page.render() failed:', err);
-    throw err;
-  }
+export interface TextItem {
+  str: string;
+  dir: string;
+  width: number;
+  height: number;
+  transform: number[];
+  fontName: string;
+  hasEOL: boolean;
+}
+
+export async function getTextContent(
+  page: pdfjsLib.PDFPageProxy
+): Promise<{ items: TextItem[]; styles: Record<string, any> }> {
+  const textContent = await page.getTextContent();
+  return textContent as { items: TextItem[]; styles: Record<string, any> };
 }

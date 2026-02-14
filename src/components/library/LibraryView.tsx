@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Search, Grid, List, FolderPlus, Star, Clock } from 'lucide-react';
+import { Search, Grid, List, FolderPlus, Star, Clock, Upload } from 'lucide-react';
 import { FileCard } from './FileCard';
 import { ImportModal } from './ImportModal';
 import { ImportProgress } from './ImportProgress';
@@ -8,6 +8,7 @@ import type { LibraryItem, ImportResult as ImportResultType, ImportProgress as I
 
 interface LibraryViewProps {
   onOpenRecentFile: (path: string) => void;
+  onOpenFile?: (file: File | string) => void;
   items: LibraryItem[];
   onImportFiles: (files: ScannedFile[]) => Promise<ImportResultType>;
   onToggleFavorite: (itemId: string) => void;
@@ -20,6 +21,7 @@ interface LibraryViewProps {
 
 export function LibraryView({
   onOpenRecentFile,
+  onOpenFile,
   items,
   onImportFiles,
   onToggleFavorite,
@@ -35,6 +37,7 @@ export function LibraryView({
   const [showImportModal, setShowImportModal] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultType | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Track previous triggerImport value to detect changes
   const prevTriggerImportRef = useRef(triggerImport);
@@ -84,6 +87,34 @@ export function LibraryView({
     [onImportFiles]
   );
 
+  // 处理拖拽事件
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files).filter(
+      file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    );
+
+    if (files.length > 0 && onOpenFile) {
+      // 打开第一个 PDF 文件
+      onOpenFile(files[0]);
+    }
+  }, [onOpenFile]);
+
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -102,7 +133,23 @@ export function LibraryView({
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#f6f7f8] dark:bg-background-dark">
+    <div 
+      className="flex-1 flex flex-col bg-[#f6f7f8] dark:bg-background-dark relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* 拖拽遮罩 */}
+      {isDragOver && (
+        <div className="absolute inset-0 bg-blue-500/10 border-4 border-blue-500 border-dashed z-50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+            <Upload className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-slate-800 mb-2">释放以打开 PDF</h3>
+            <p className="text-slate-500">将文件拖放到此处即可打开阅读</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="h-16 bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-6">
         <h1 className="text-xl font-semibold text-slate-800 dark:text-white">Library</h1>
@@ -195,7 +242,7 @@ export function LibraryView({
               No PDF files yet
             </h2>
             <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
-              Import a folder to get started with your PDF library.
+              Import a folder to get started with your PDF library. You can also drag and drop PDF files here to open them.
             </p>
             <button
               onClick={() => setShowImportModal(true)}

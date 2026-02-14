@@ -3,13 +3,21 @@ import { Sidebar } from './components/layout/Sidebar';
 import { LibraryView } from './components/library/LibraryView';
 import { Viewer } from './components/viewer/Viewer';
 import { useLibrary } from './hooks/useLibrary';
+import { useTabs } from './hooks/useTabs';
 import type { ScannedFile, ImportResult as ImportResultType } from './types/library';
 
 function App() {
   const [activeView, setActiveView] = useState<'library' | 'reader'>('library');
-  const [currentFile, setCurrentFile] = useState<File | null>(null);
-  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // 使用标签页 hook 管理多文件
+  const {
+    tabs,
+    activeTabId,
+    openFile,
+    closeTab,
+    switchTab,
+  } = useTabs();
 
   // Use the library hook for managing PDF library
   const {
@@ -23,35 +31,44 @@ function App() {
     lastSyncResult,
   } = useLibrary();
 
-  // Handle opening a file from the library - just open it for reading, don't add to library
+  // Handle opening a file from the library
   const handleOpenRecentFile = useCallback(
     (path: string) => {
-      setCurrentFilePath(path);
-      setCurrentFile(null);
-      // Update the item's lastOpened timestamp if it exists in the library
+      // 更新 lastOpened 时间戳
       const existingItem = libraryItems.find((item) => item.path === path);
       if (existingItem) {
         updateItem(existingItem.id, {
           lastOpened: new Date().toISOString(),
         });
       }
+      
+      // 打开文件到新标签页
+      openFile(path);
       setActiveView('reader');
     },
-    [libraryItems, updateItem]
+    [libraryItems, updateItem, openFile]
   );
 
-  const handleCloseViewer = useCallback(() => {
-    setCurrentFile(null);
-    setCurrentFilePath(null);
-    setActiveView('library');
-  }, []);
+  // 从 LibraryView 拖拽/选择打开文件
+  const handleOpenFile = useCallback((file: File | string) => {
+    openFile(file);
+    setActiveView('reader');
+  }, [openFile]);
+
+  // 关闭所有标签页时返回图书馆
+  const handleTabClose = useCallback((tabId: string) => {
+    closeTab(tabId);
+    // 如果关闭后没有标签页了，返回图书馆视图
+    if (tabs.length <= 1) {
+      setActiveView('library');
+    }
+  }, [closeTab, tabs.length]);
 
   // Handle import folder from sidebar
   const [importTrigger, setImportTrigger] = useState(0);
 
   const handleImportFolder = useCallback(() => {
     setActiveView('library');
-    // Trigger import modal in LibraryView
     setImportTrigger((prev) => prev + 1);
   }, []);
 
@@ -76,6 +93,7 @@ function App() {
       {activeView === 'library' ? (
         <LibraryView
           onOpenRecentFile={handleOpenRecentFile}
+          onOpenFile={handleOpenFile}
           items={libraryItems}
           onImportFiles={handleImportFiles}
           onToggleFavorite={toggleFavorite}
@@ -87,9 +105,11 @@ function App() {
         />
       ) : (
         <Viewer
-          file={currentFile}
-          filePath={currentFilePath}
-          onClose={handleCloseViewer}
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabChange={switchTab}
+          onTabClose={handleTabClose}
+          onOpenFile={handleOpenFile}
         />
       )}
     </div>
