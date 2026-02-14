@@ -11,7 +11,7 @@ export function Sidebar({ onImportFolder, activeView, onViewChange }: SidebarPro
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <aside className="w-16 lg:w-64 bg-white dark:bg-[#101922] border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300">
+    <aside className="w-16 lg:w-64 bg-white dark:bg-background-dark border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300">
       {/* Logo */}
       <div className="h-16 flex items-center justify-center lg:justify-start lg:px-4 border-b border-slate-200 dark:border-slate-700">
         <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">

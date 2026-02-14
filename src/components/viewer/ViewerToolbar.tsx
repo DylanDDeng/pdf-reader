@@ -31,7 +31,7 @@ export function ViewerToolbar({
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <header className="h-14 bg-white dark:bg-[#101922] border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4">
+    <header className="h-14 bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4">
       {/* Left - File Name */}
       <div className="flex items-center gap-3">
         <button

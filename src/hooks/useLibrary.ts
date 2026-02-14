@@ -33,6 +33,7 @@ export interface UseLibraryReturn {
   removeItem: (itemId: string) => void;
   updateItem: (itemId: string, updates: Partial<LibraryItem>) => void;
   toggleFavorite: (itemId: string) => void;
+  renameItem: (itemId: string, newName: string) => Promise<{ success: boolean; error?: string }>;
   refreshLibrary: () => void;
   syncLibrary: () => Promise<{ removedCount: number }>;
 }
@@ -341,6 +342,45 @@ export function useLibrary(): UseLibraryReturn {
     [state]
   );
 
+  // Rename item (file and library entry)
+  const renameItem = useCallback(
+    async (itemId: string, newName: string): Promise<{ success: boolean; error?: string }> => {
+      const item = state.items.find((i) => i.id === itemId);
+      if (!item) {
+        return { success: false, error: 'Item not found' };
+      }
+
+      try {
+        const result = await libraryService.renamePdfFile(item.path, newName);
+
+        if (result.success && result.newPath) {
+          // Update both name and path in the library
+          const newItems = libraryService.updateLibraryItem(
+            state.items,
+            itemId,
+            {
+              name: newName,
+              path: result.newPath
+            }
+          );
+          const newState = { ...state, items: newItems };
+          libraryService.saveLibrary(newState);
+          setState(newState);
+          return { success: true };
+        }
+
+        return { success: false, error: result.error };
+      } catch (error) {
+        console.error('Error renaming item:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    },
+    [state]
+  );
+
   // Refresh library
   const refreshLibrary = useCallback(() => {
     const savedState = libraryService.getLibrary();
@@ -362,6 +402,7 @@ export function useLibrary(): UseLibraryReturn {
     removeItem,
     updateItem,
     toggleFavorite,
+    renameItem,
     refreshLibrary,
     syncLibrary,
   };

@@ -408,3 +408,27 @@ export async function verifyAndCleanLibrary(
     return { validItems: items, removedCount: 0 };
   }
 }
+
+// Rename a PDF file in the filesystem
+export async function renamePdfFile(
+  oldPath: string,
+  newName: string
+): Promise<{ success: boolean; newPath?: string; error?: string }> {
+  try {
+    // Remove .pdf extension from newName if present (we'll preserve the original extension)
+    const cleanName = newName.replace(/\.pdf$/i, '');
+
+    const newPath = await invoke<string>('rename_file', {
+      oldPath,
+      newName: cleanName,
+    });
+
+    return { success: true, newPath };
+  } catch (error) {
+    console.error('Error renaming file:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}

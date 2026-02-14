@@ -18,6 +18,7 @@ function App() {
     updateItem,
     toggleFavorite,
     removeItem,
+    renameItem,
     lastSyncResult,
   } = useLibrary();
 
@@ -76,6 +77,7 @@ function App() {
           onImportFiles={handleImportFiles}
           onToggleFavorite={toggleFavorite}
           onRemoveItem={removeItem}
+          onRenameItem={renameItem}
           importProgress={importProgress}
           lastSyncResult={lastSyncResult}
           triggerImport={importTrigger}

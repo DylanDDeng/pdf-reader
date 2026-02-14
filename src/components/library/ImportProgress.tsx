@@ -18,7 +18,7 @@ export function ImportProgress({ progress, onCancel }: ImportProgressProps) {
   const getStatusIcon = () => {
     switch (status) {
       case 'scanning':
-        return <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />;
+        return <Loader2 className="w-5 h-5 text-primary animate-spin" />;
       case 'importing':
         return <FileText className="w-5 h-5 text-primary" />;
       case 'completed':

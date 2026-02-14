@@ -12,6 +12,7 @@ interface LibraryViewProps {
   onImportFiles: (files: ScannedFile[]) => Promise<ImportResultType>;
   onToggleFavorite: (itemId: string) => void;
   onRemoveItem: (itemId: string) => void;
+  onRenameItem: (itemId: string, newName: string) => Promise<{ success: boolean; error?: string }>;
   importProgress: ImportProgressType | null;
   lastSyncResult?: { removedCount: number } | null;
   triggerImport?: number;
@@ -23,6 +24,7 @@ export function LibraryView({
   onImportFiles,
   onToggleFavorite,
   onRemoveItem,
+  onRenameItem,
   importProgress,
   lastSyncResult,
   triggerImport,
@@ -102,7 +104,7 @@ export function LibraryView({
   return (
     <div className="flex-1 flex flex-col bg-[#f6f7f8] dark:bg-background-dark">
       {/* Header */}
-      <header className="h-16 bg-white dark:bg-[#101922] border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-6">
+      <header className="h-16 bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-6">
         <h1 className="text-xl font-semibold text-slate-800 dark:text-white">Library</h1>
 
         <div className="flex items-center gap-4">
@@ -263,6 +265,7 @@ export function LibraryView({
                       isFavorite={true}
                       onToggleFavorite={() => onToggleFavorite(item.id)}
                       onRemove={() => onRemoveItem(item.id)}
+                      onRename={async (newName) => onRenameItem(item.id, newName)}
                       metadata={item.metadata}
                       thumbnail={item.metadata?.thumbnail}
                     />
@@ -304,6 +307,7 @@ export function LibraryView({
                       isFavorite={item.favorite}
                       onToggleFavorite={() => onToggleFavorite(item.id)}
                       onRemove={() => onRemoveItem(item.id)}
+                      onRename={async (newName) => onRenameItem(item.id, newName)}
                       metadata={item.metadata}
                       thumbnail={item.metadata?.thumbnail}
                     />

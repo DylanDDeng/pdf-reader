@@ -223,6 +223,53 @@ fn verify_files_exist(file_paths: Vec<String>) -> Vec<(String, bool)> {
         .collect()
 }
 
+#[tauri::command]
+fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
+    let path = Path::new(&old_path);
+
+    // Verify file exists
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", old_path));
+    }
+
+    if !path.is_file() {
+        return Err(format!("Path is not a file: {}", old_path));
+    }
+
+    // Get parent directory and construct new path
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Could not determine parent directory".to_string())?;
+
+    // Get the file extension (preserve it)
+    let extension = path
+        .extension()
+        .map(|ext| ext.to_string_lossy().to_string());
+
+    // Construct new filename with extension
+    let new_filename = if let Some(ext) = extension {
+        format!("{}.{}", new_name, ext)
+    } else {
+        new_name.clone()
+    };
+
+    let new_path = parent.join(&new_filename);
+
+    // Check if new path already exists
+    if new_path.exists() {
+        return Err(format!(
+            "A file named '{}' already exists in this location",
+            new_filename
+        ));
+    }
+
+    // Perform the rename
+    std::fs::rename(&path, &new_path)
+        .map_err(|e| format!("Failed to rename file: {}", e))?;
+
+    Ok(new_path.to_string_lossy().to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
     pub name: String,
@@ -248,7 +295,8 @@ pub fn run() {
             start_watch_folder,
             stop_watch_folder,
             get_file_metadata,
-            verify_files_exist
+            verify_files_exist,
+            rename_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
