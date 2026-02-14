@@ -1,26 +1,87 @@
-import { useState } from 'react';
-import { Search, Grid, List } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Search, Grid, List, FolderPlus, Star, Clock } from 'lucide-react';
 import { FileCard } from './FileCard';
-
-interface RecentFile {
-  name: string;
-  path: string;
-  lastOpened: string;
-}
+import { ImportModal } from './ImportModal';
+import { ImportProgress } from './ImportProgress';
+import { ImportResult } from './ImportResult';
+import type { LibraryItem, ImportResult as ImportResultType, ImportProgress as ImportProgressType, ScannedFile } from '../../types/library';
 
 interface LibraryViewProps {
   onOpenFile: () => void;
   onOpenRecentFile: (path: string) => void;
-  recentFiles: RecentFile[];
+  items: LibraryItem[];
+  onImportFiles: (files: ScannedFile[]) => Promise<ImportResultType>;
+  onToggleFavorite: (itemId: string) => void;
+  importProgress: ImportProgressType | null;
 }
 
-export function LibraryView({ onOpenFile, onOpenRecentFile, recentFiles }: LibraryViewProps) {
+export function LibraryView({
+  onOpenFile,
+  onOpenRecentFile,
+  items,
+  onImportFiles,
+  onToggleFavorite,
+  importProgress,
+}: LibraryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResultType | null>(null);
 
-  const filteredFiles = recentFiles.filter((file) =>
-    file.name.toLowerCase().includes(searchQuery.toLowerCase())
+  // Filter items based on search and favorites
+  const filteredItems = items.filter((item) => {
+    const matchesSearch =
+      searchQuery === '' ||
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.path.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesFavorites = !showFavorites || item.favorite;
+
+    return matchesSearch && matchesFavorites;
+  });
+
+  // Sort items by last opened
+  const sortedItems = [...filteredItems].sort((a, b) => {
+    return new Date(b.lastOpened).getTime() - new Date(a.lastOpened).getTime();
+  });
+
+  // Favorites
+  const favoriteItems = sortedItems.filter((item) => item.favorite);
+  const recentItems = sortedItems.filter((item) => !item.favorite);
+
+  const handleImport = useCallback(
+    async (files: ScannedFile[]) => {
+      setIsImporting(true);
+      try {
+        const result = await onImportFiles(files);
+        setImportResult(result);
+      } catch (error) {
+        console.error('Import error:', error);
+      } finally {
+        setIsImporting(false);
+      }
+    },
+    [onImportFiles]
   );
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return 'Today';
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return `${diffDays} days ago`;
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-[#f6f7f8] dark:bg-background-dark">
@@ -40,6 +101,19 @@ export function LibraryView({ onOpenFile, onOpenRecentFile, recentFiles }: Libra
               className="w-64 pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border border-transparent rounded-lg text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             />
           </div>
+
+          {/* Favorites Filter */}
+          <button
+            onClick={() => setShowFavorites(!showFavorites)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              showFavorites
+                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
+                : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Star className={`w-4 h-4 ${showFavorites ? 'fill-current' : ''}`} />
+            <span className="hidden sm:inline">Favorites</span>
+          </button>
 
           {/* View Toggle */}
           <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
@@ -70,7 +144,7 @@ export function LibraryView({ onOpenFile, onOpenRecentFile, recentFiles }: Libra
       {/* Content */}
       <main className="flex-1 overflow-auto p-6">
         {/* Empty State */}
-        {recentFiles.length === 0 ? (
+        {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
               <svg
@@ -91,42 +165,162 @@ export function LibraryView({ onOpenFile, onOpenRecentFile, recentFiles }: Libra
               No PDF files yet
             </h2>
             <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
-              Open a PDF file to get started. Your recently opened files will appear here.
+              Open a PDF file or import a folder to get started.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={onOpenFile}
+                className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium"
+              >
+                Open PDF File
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="px-6 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl transition-colors font-medium flex items-center gap-2"
+              >
+                <FolderPlus className="w-4 h-4" />
+                Import Folder
+              </button>
+            </div>
+          </div>
+        ) : showFavorites && favoriteItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+              <Star className="w-12 h-12 text-slate-400" />
+            </div>
+            <h2 className="text-lg font-medium text-slate-800 dark:text-white mb-2">
+              No favorites yet
+            </h2>
+            <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
+              Star your favorite PDFs to access them quickly here.
             </p>
             <button
-              onClick={onOpenFile}
+              onClick={() => setShowFavorites(false)}
               className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium"
             >
-              Open PDF File
+              View All Files
             </button>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+              <Search className="w-12 h-12 text-slate-400" />
+            </div>
+            <h2 className="text-lg font-medium text-slate-800 dark:text-white mb-2">
+              No results found
+            </h2>
+            <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
+              Try a different search term.
+            </p>
           </div>
         ) : (
           <>
-            {/* Recent Files Section */}
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-slate-800 dark:text-white mb-4">
-                Recent Files
-              </h2>
-              <div
-                className={
-                  viewMode === 'grid'
-                    ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'
-                    : 'flex flex-col gap-2'
-                }
-              >
-                {filteredFiles.map((file, index) => (
-                  <FileCard
-                    key={index}
-                    name={file.name}
-                    lastOpened={file.lastOpened}
-                    onClick={() => onOpenRecentFile(file.path)}
-                  />
-                ))}
+            {/* Favorites Section */}
+            {favoriteItems.length > 0 && !showFavorites && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Star className="w-5 h-5 text-amber-500 fill-current" />
+                  <h2 className="text-lg font-semibold text-slate-800 dark:text-white">
+                    Favorites
+                  </h2>
+                  <span className="text-sm text-slate-400">
+                    {favoriteItems.length}
+                  </span>
+                </div>
+                <div
+                  className={
+                    viewMode === 'grid'
+                      ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'
+                      : 'flex flex-col gap-2'
+                  }
+                >
+                  {favoriteItems.slice(0, 5).map((item) => (
+                    <FileCard
+                      key={item.id}
+                      name={item.name}
+                      lastOpened={formatDate(item.lastOpened)}
+                      onClick={() => onOpenRecentFile(item.path)}
+                      isFavorite={true}
+                      onToggleFavorite={() => onToggleFavorite(item.id)}
+                    />
+                  ))}
+                </div>
               </div>
+            )}
+
+            {/* Recent Files Section */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-slate-400" />
+                  <h2 className="text-lg font-semibold text-slate-800 dark:text-white">
+                    {showFavorites ? 'Favorites' : 'Recent Files'}
+                  </h2>
+                  <span className="text-sm text-slate-400">
+                    {showFavorites ? favoriteItems.length : recentItems.length}
+                  </span>
+                </div>
+                {!showFavorites && (
+                  <button
+                    onClick={() => setShowImportModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <FolderPlus className="w-4 h-4" />
+                    Import Folder
+                  </button>
+                )}
+              </div>
+
+              {(showFavorites ? favoriteItems : recentItems).length === 0 ? (
+                <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                  {showFavorites ? 'No favorite files' : 'No recent files'}
+                </div>
+              ) : (
+                <div
+                  className={
+                    viewMode === 'grid'
+                      ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'
+                      : 'flex flex-col gap-2'
+                  }
+                >
+                  {(showFavorites ? favoriteItems : recentItems).map((item) => (
+                    <FileCard
+                      key={item.id}
+                      name={item.name}
+                      lastOpened={formatDate(item.lastOpened)}
+                      onClick={() => onOpenRecentFile(item.path)}
+                      isFavorite={item.favorite}
+                      onToggleFavorite={() => onToggleFavorite(item.id)}
+                      metadata={item.metadata}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}
       </main>
+
+      {/* Import Modal */}
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImport={handleImport}
+        isImporting={isImporting}
+      />
+
+      {/* Import Progress */}
+      {importProgress && (
+        <ImportProgress progress={importProgress} />
+      )}
+
+      {/* Import Result */}
+      {importResult && (
+        <ImportResult
+          result={importResult}
+          onClose={() => setImportResult(null)}
+        />
+      )}
     </div>
   );
 }

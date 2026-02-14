@@ -9,13 +9,15 @@
     "dialog:default",
     "fs:default",
     "fs:allow-read-file",
+    "fs:allow-read-dir",
     {
       "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
-        { "path": "$DOCUMENT/**" }
+        { "path": "$DOCUMENT/**" },
+        { "path": "/" }
       ]
     }
   ]

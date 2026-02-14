@@ -2,46 +2,44 @@ import { useState, useCallback, useEffect } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { LibraryView } from './components/library/LibraryView';
 import { Viewer } from './components/viewer/Viewer';
-
-interface RecentFile {
-  name: string;
-  path: string;
-  lastOpened: string;
-}
+import { useLibrary } from './hooks/useLibrary';
+import type { ScannedFile, ImportResult as ImportResultType } from './types/library';
 
 function App() {
   const [activeView, setActiveView] = useState<'library' | 'reader'>('library');
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
 
-  // Load recent files from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem('recentFiles');
-    if (stored) {
-      try {
-        setRecentFiles(JSON.parse(stored));
-      } catch {
-        // Ignore parse errors
+  // Use the library hook for managing PDF library
+  const {
+    items: libraryItems,
+    importProgress,
+    importFiles,
+    updateItem,
+    toggleFavorite,
+  } = useLibrary();
+
+  // Handle opening a file
+  const addRecentFile = useCallback(
+    (name: string, path: string) => {
+      // Update the item's lastOpened timestamp
+      const existingItem = libraryItems.find((item) => item.path === path);
+      if (existingItem) {
+        updateItem(existingItem.id, {
+          lastOpened: new Date().toISOString(),
+        });
+      } else {
+        // Import the single file
+        const scannedFile: ScannedFile = {
+          name,
+          path,
+          size: 0,
+        };
+        importFiles([scannedFile]);
       }
-    }
-  }, []);
-
-  // Save recent files to localStorage
-  const addRecentFile = useCallback((name: string, path: string) => {
-    const newFile: RecentFile = {
-      name,
-      path,
-      lastOpened: new Date().toLocaleDateString(),
-    };
-
-    setRecentFiles((prev) => {
-      const filtered = prev.filter((f) => f.path !== path);
-      const updated = [newFile, ...filtered].slice(0, 20);
-      localStorage.setItem('recentFiles', JSON.stringify(updated));
-      return updated;
-    });
-  }, []);
+    },
+    [libraryItems, updateItem, importFiles]
+  );
 
   const handleOpenFile = useCallback(async () => {
     try {
@@ -87,10 +85,36 @@ function App() {
     setActiveView('library');
   }, []);
 
+  // Handle import folder from sidebar
+  const [showImportFromSidebar, setShowImportFromSidebar] = useState(false);
+
+  const handleImportFolder = useCallback(() => {
+    setActiveView('library');
+    // Trigger import modal in LibraryView
+    setShowImportFromSidebar(true);
+  }, []);
+
+  // Clear the import trigger after it's been handled
+  useEffect(() => {
+    if (showImportFromSidebar) {
+      const timer = setTimeout(() => setShowImportFromSidebar(false), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [showImportFromSidebar]);
+
+  // Handle importing files
+  const handleImportFiles = useCallback(
+    async (files: ScannedFile[]): Promise<ImportResultType> => {
+      return await importFiles(files);
+    },
+    [importFiles]
+  );
+
   return (
     <div className="flex h-screen bg-[#f6f7f8] dark:bg-background-dark">
       <Sidebar
         onOpenFile={handleOpenFile}
+        onImportFolder={handleImportFolder}
         activeView={activeView}
         onViewChange={setActiveView}
       />
@@ -99,7 +123,10 @@ function App() {
         <LibraryView
           onOpenFile={handleOpenFile}
           onOpenRecentFile={handleOpenRecentFile}
-          recentFiles={recentFiles}
+          items={libraryItems}
+          onImportFiles={handleImportFiles}
+          onToggleFavorite={toggleFavorite}
+          importProgress={importProgress}
         />
       ) : (
         <Viewer
