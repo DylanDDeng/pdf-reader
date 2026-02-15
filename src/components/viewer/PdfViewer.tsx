@@ -90,6 +90,7 @@ export function PdfViewer({
   const textRenderLocksRef = useRef<Map<number, Promise<void>>>(new Map());
   const renderedCanvasScaleRef = useRef<Map<number, number>>(new Map());
   const renderedTextScaleRef = useRef<Map<number, number>>(new Map());
+  const scheduleVisiblePageRenderRef = useRef<() => void>(() => {});
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -557,6 +558,10 @@ export function PdfViewer({
     }
   }, [collectRenderTargets, deleteMode, ensurePageCanvas, ensurePageTextLayer, pageCount, pruneFarLayers, selectedPage, toolbarPosition]);
 
+  useEffect(() => {
+    scheduleVisiblePageRenderRef.current = scheduleVisiblePageRender;
+  }, [scheduleVisiblePageRender]);
+
   const findPageFromScroll = useCallback(() => {
     if (!onPageChange || isProgrammaticScrollRef.current) {
       return;
@@ -588,15 +593,15 @@ export function PdfViewer({
     }
     renderSeqRef.current += 1;
     resetRenderCaches(true);
-    scheduleVisiblePageRender();
-  }, [pageCount, scale, resetRenderCaches, scheduleVisiblePageRender]);
+    scheduleVisiblePageRenderRef.current();
+  }, [pageCount, scale, resetRenderCaches]);
 
   useEffect(() => {
     if (pageCount === 0) {
       return;
     }
-    scheduleVisiblePageRender();
-  }, [deleteMode, pageCount, scheduleVisiblePageRender]);
+    scheduleVisiblePageRenderRef.current();
+  }, [deleteMode, pageCount]);
 
   useEffect(() => {
     if (deleteMode || pageCount === 0 || currentPage < 1) {
@@ -627,7 +632,7 @@ export function PdfViewer({
         if (!isProgrammaticScrollRef.current) {
           findPageFromScroll();
         }
-        scheduleVisiblePageRender();
+        scheduleVisiblePageRenderRef.current();
       });
     };
 
@@ -643,7 +648,7 @@ export function PdfViewer({
         scrollRafRef.current = null;
       }
     };
-  }, [findPageFromScroll, scheduleVisiblePageRender]);
+  }, [findPageFromScroll]);
 
   useEffect(() => {
     if (pageCount === 0) {
@@ -849,7 +854,7 @@ export function PdfViewer({
             }
           });
         }
-        scheduleVisiblePageRender();
+        scheduleVisiblePageRenderRef.current();
         return;
       }
 
@@ -882,7 +887,7 @@ export function PdfViewer({
         selectionRenderUnlockTimerRef.current = setTimeout(() => {
           selectionRenderLockRef.current = false;
           selectionRenderUnlockTimerRef.current = null;
-          scheduleVisiblePageRender();
+          scheduleVisiblePageRenderRef.current();
         }, 120);
       }, 20);
     };
@@ -929,7 +934,7 @@ export function PdfViewer({
       selectionRenderLockRef.current = false;
       selectionRenderUnlockTimerRef.current = null;
     };
-  }, [deleteMode, ensurePageTextLayer, isPageTextLayerReady, resetSelectionState, scheduleVisiblePageRender, updateSelectionFromWindow]);
+  }, [deleteMode, ensurePageTextLayer, isPageTextLayerReady, resetSelectionState, updateSelectionFromWindow]);
 
   const handleToolbarAction = (action: AnnotationAction) => {
     if (action !== 'highlight' || !selectedText || selectedRects.length === 0 || !selectedPage) {
