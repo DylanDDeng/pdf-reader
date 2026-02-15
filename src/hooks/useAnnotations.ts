@@ -7,8 +7,23 @@ export function useAnnotations(fileId: string | null) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const persistAnnotations = useCallback((newAnnotations: Annotation[]) => {
+    if (!fileId) return;
+
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const allAnnotations = stored ? JSON.parse(stored) : {};
+      allAnnotations[fileId] = newAnnotations;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(allAnnotations));
+    } catch (err) {
+      console.error('Failed to save annotations:', err);
+    }
+  }, [fileId]);
+
   // Load annotations from localStorage
   useEffect(() => {
+    setIsLoaded(false);
+
     if (!fileId) {
       setAnnotations([]);
       setIsLoaded(true);
@@ -20,27 +35,14 @@ export function useAnnotations(fileId: string | null) {
       if (stored) {
         const allAnnotations = JSON.parse(stored);
         setAnnotations(allAnnotations[fileId] || []);
+      } else {
+        setAnnotations([]);
       }
     } catch (err) {
       console.error('Failed to load annotations:', err);
+      setAnnotations([]);
     }
     setIsLoaded(true);
-  }, [fileId]);
-
-  // Save annotations to localStorage
-  const saveAnnotations = useCallback((newAnnotations: Annotation[]) => {
-    if (!fileId) return;
-
-    setAnnotations(newAnnotations);
-    
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const allAnnotations = stored ? JSON.parse(stored) : {};
-      allAnnotations[fileId] = newAnnotations;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(allAnnotations));
-    } catch (err) {
-      console.error('Failed to save annotations:', err);
-    }
   }, [fileId]);
 
   // Add a new highlight annotation
@@ -61,35 +63,49 @@ export function useAnnotations(fileId: string | null) {
       updatedAt: new Date().toISOString(),
     };
 
-    saveAnnotations([...annotations, newAnnotation]);
+    setAnnotations((prev) => {
+      const next = [...prev, newAnnotation];
+      persistAnnotations(next);
+      return next;
+    });
+
     return newAnnotation;
-  }, [annotations, saveAnnotations]);
+  }, [persistAnnotations]);
 
   // Update annotation comment
   const updateComment = useCallback((annotationId: string, comment: string) => {
-    const updated = annotations.map(ann => 
-      ann.id === annotationId 
-        ? { ...ann, comment, updatedAt: new Date().toISOString() }
-        : ann
-    );
-    saveAnnotations(updated);
-  }, [annotations, saveAnnotations]);
+    setAnnotations((prev) => {
+      const next = prev.map(ann =>
+        ann.id === annotationId
+          ? { ...ann, comment, updatedAt: new Date().toISOString() }
+          : ann
+      );
+      persistAnnotations(next);
+      return next;
+    });
+  }, [persistAnnotations]);
 
   // Change highlight color
   const updateColor = useCallback((annotationId: string, color: HighlightColor) => {
-    const updated = annotations.map(ann => 
-      ann.id === annotationId 
-        ? { ...ann, color, updatedAt: new Date().toISOString() }
-        : ann
-    );
-    saveAnnotations(updated);
-  }, [annotations, saveAnnotations]);
+    setAnnotations((prev) => {
+      const next = prev.map(ann =>
+        ann.id === annotationId
+          ? { ...ann, color, updatedAt: new Date().toISOString() }
+          : ann
+      );
+      persistAnnotations(next);
+      return next;
+    });
+  }, [persistAnnotations]);
 
   // Delete annotation
   const deleteAnnotation = useCallback((annotationId: string) => {
-    const updated = annotations.filter(ann => ann.id !== annotationId);
-    saveAnnotations(updated);
-  }, [annotations, saveAnnotations]);
+    setAnnotations((prev) => {
+      const next = prev.filter(ann => ann.id !== annotationId);
+      persistAnnotations(next);
+      return next;
+    });
+  }, [persistAnnotations]);
 
   // Get annotations for specific page
   const getAnnotationsByPage = useCallback((page: number) => {

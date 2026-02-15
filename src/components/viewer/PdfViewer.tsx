@@ -10,7 +10,14 @@ interface PdfViewerProps {
   scale: number;
   annotations: Annotation[];
   onDocumentLoad: (totalPages: number, outline: OutlineItem[]) => void;
-  onAddHighlight: (page: number, selectedText: string, rects: Array<{ left: number; top: number; width: number; height: number }>) => void;
+  onAddHighlight: (
+    page: number,
+    selectedText: string,
+    color: HighlightColor,
+    rects: Array<{ left: number; top: number; width: number; height: number }>
+  ) => void;
+  onHighlightClick?: (annotation: Annotation) => void;
+  interactiveHighlights?: boolean;
 }
 
 export function PdfViewer({
@@ -20,11 +27,12 @@ export function PdfViewer({
   annotations,
   onDocumentLoad,
   onAddHighlight,
+  onHighlightClick,
+  interactiveHighlights = false,
 }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pageRef = useRef<any>(null);
   const documentRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,7 +45,7 @@ export function PdfViewer({
   const [selectedColor, setSelectedColor] = useState<HighlightColor>('yellow');
   
   // 用于防止选择事件重复触发
-  const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const renderCurrentPage = useCallback(async () => {
     if (!documentRef.current || !canvasRef.current || !textLayerRef.current) {
@@ -46,7 +54,6 @@ export function PdfViewer({
 
     try {
       const page = await documentRef.current.getPage(currentPage);
-      pageRef.current = page;
       
       const viewport = page.getViewport({ scale });
       setPageSize({ width: viewport.width, height: viewport.height });
@@ -174,7 +181,8 @@ export function PdfViewer({
           onDocumentLoad(doc.numPages, outline);
 
           if (canvasRef.current && textLayerRef.current) {
-            const page = await doc.getPage(1);
+            const initialPage = Math.max(1, Math.min(currentPage, doc.numPages));
+            const page = await doc.getPage(initialPage);
             const viewport = page.getViewport({ scale });
             setPageSize({ width: viewport.width, height: viewport.height });
             
@@ -233,7 +241,7 @@ export function PdfViewer({
     const anchorInLayer = checkNode(range.startContainer);
     const focusInLayer = checkNode(range.endContainer);
 
-    return anchorInLayer || focusInLayer;
+    return anchorInLayer && focusInLayer;
   }, []);
 
   // 获取选中文本的信息
@@ -277,45 +285,45 @@ export function PdfViewer({
     };
   }, []);
 
-  // 处理选择变化
+  const resetSelectionState = useCallback((clearBrowserSelection: boolean = false) => {
+    if (clearBrowserSelection) {
+      window.getSelection()?.removeAllRanges();
+    }
+
+    setToolbarPosition(null);
+    setSelectedText('');
+    setSelectedRects([]);
+  }, []);
+
   const handleSelectionChange = useCallback(() => {
     const selection = window.getSelection();
-    
-    console.log('Selection changed:', {
-      selection: selection?.toString(),
-      isCollapsed: selection?.isCollapsed,
-      rangeCount: selection?.rangeCount,
-    });
 
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      resetSelectionState();
       return;
     }
 
-    // 检查选择是否在文本层内
     if (!isSelectionInTextLayer(selection)) {
-      console.log('Selection not in text layer');
+      resetSelectionState();
       return;
     }
 
-    console.log('Selection in text layer, processing...');
-
-    // 使用 setTimeout 确保选择完成
     if (selectionTimeoutRef.current) {
       clearTimeout(selectionTimeoutRef.current);
     }
 
     selectionTimeoutRef.current = setTimeout(() => {
       const info = getSelectionInfo(selection);
-      console.log('Selection info:', info);
       
       if (info && info.text.length > 0) {
         setSelectedText(info.text);
         setSelectedRects(info.rects);
         setToolbarPosition(info.mousePosition);
-        console.log('Toolbar should show at:', info.mousePosition);
+      } else {
+        resetSelectionState();
       }
     }, 10);
-  }, [isSelectionInTextLayer, getSelectionInfo]);
+  }, [isSelectionInTextLayer, getSelectionInfo, resetSelectionState]);
 
   // 监听选择变化
   useEffect(() => {
@@ -340,22 +348,18 @@ export function PdfViewer({
         height: rect.height / scale,
       }));
       
-      onAddHighlight(currentPage, selectedText, scaledRects);
-      
-      // 清除选择
-      window.getSelection()?.removeAllRanges();
-      setToolbarPosition(null);
-      setSelectedText('');
-      setSelectedRects([]);
+      onAddHighlight(currentPage, selectedText, selectedColor, scaledRects);
+      resetSelectionState(true);
     }
   };
 
   const handleCloseToolbar = () => {
-    window.getSelection()?.removeAllRanges();
-    setToolbarPosition(null);
-    setSelectedText('');
-    setSelectedRects([]);
+    resetSelectionState(true);
   };
+
+  useEffect(() => {
+    resetSelectionState(true);
+  }, [currentPage, scale, file, resetSelectionState]);
 
   return (
     <div
@@ -412,6 +416,8 @@ export function PdfViewer({
               scale={scale}
               pageWidth={pageSize.width}
               pageHeight={pageSize.height}
+              interactive={interactiveHighlights}
+              onAnnotationClick={onHighlightClick}
             />
           )}
         </div>

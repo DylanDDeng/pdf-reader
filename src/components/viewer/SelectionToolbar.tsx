@@ -56,15 +56,12 @@ export function SelectionToolbar({
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
-        console.log('Click outside toolbar, closing');
         onClose();
       }
     };
 
-    // 延迟添加监听，避免双击选择时立即触发关闭
     const timer = setTimeout(() => {
       document.addEventListener('mousedown', handleClickOutside);
-      console.log('Toolbar: click outside listener added');
     }, 300);
 
     return () => {
@@ -76,10 +73,6 @@ export function SelectionToolbar({
   const handleAction = (action: AnnotationAction) => {
     if (action === 'highlight') {
       onAction(action);
-      onClose();
-    } else {
-      // 下划线和批注暂时不支持，显示提示
-      console.log(`${action} not implemented yet`);
       onClose();
     }
   };
@@ -117,8 +110,8 @@ export function SelectionToolbar({
 
         {/* 下划线按钮 */}
         <button
-          onClick={() => handleAction('underline')}
-          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+          disabled
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-300 cursor-not-allowed"
           title="下划线（暂不可用）"
         >
           <Underline className="w-4 h-4" />
@@ -126,8 +119,8 @@ export function SelectionToolbar({
 
         {/* 批注按钮 */}
         <button
-          onClick={() => handleAction('comment')}
-          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+          disabled
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-300 cursor-not-allowed"
           title="添加批注（暂不可用）"
         >
           <MessageSquare className="w-4 h-4" />

@@ -1,7 +1,5 @@
-import { useState } from 'react';
 import {
   BookOpen,
-  Pencil,
   MessageSquare,
   Settings,
   ChevronRight,
@@ -15,6 +13,10 @@ interface FloatingToolbarProps {
   totalPages: number;
   onPrevPage: () => void;
   onNextPage: () => void;
+  showContents: boolean;
+  onToggleContents: () => void;
+  showAnnotations: boolean;
+  onToggleAnnotations: () => void;
 }
 
 export function FloatingToolbar({
@@ -22,15 +24,16 @@ export function FloatingToolbar({
   totalPages,
   onPrevPage,
   onNextPage,
+  showContents,
+  onToggleContents,
+  showAnnotations,
+  onToggleAnnotations,
 }: FloatingToolbarProps) {
-  const [activeTool, setActiveTool] = useState<string | null>(null);
-
   const tools = [
-    { id: 'contents', icon: BookOpen, label: 'Contents' },
-    { id: 'annotate', icon: Pencil, label: 'Annotate' },
-    { id: 'highlight', icon: Highlighter, label: 'Highlight' },
-    { id: 'bookmark', icon: Bookmark, label: 'Bookmark' },
-    { id: 'comments', icon: MessageSquare, label: 'Comments' },
+    { id: 'contents', icon: BookOpen, label: 'Contents', active: showContents, onClick: onToggleContents },
+    { id: 'highlight', icon: Highlighter, label: 'Highlight', active: false, onClick: undefined },
+    { id: 'bookmark', icon: Bookmark, label: 'Bookmark', active: false, onClick: undefined },
+    { id: 'comments', icon: MessageSquare, label: 'Comments', active: showAnnotations, onClick: onToggleAnnotations },
   ];
 
   return (
@@ -40,15 +43,15 @@ export function FloatingToolbar({
         <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-1.5 flex flex-col gap-1">
           {tools.map((tool) => {
             const Icon = tool.icon;
-            const isActive = activeTool === tool.id;
             return (
               <button
                 key={tool.id}
-                onClick={() => setActiveTool(isActive ? null : tool.id)}
+                onClick={tool.onClick}
+                disabled={!tool.onClick}
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
-                  isActive
+                  tool.active
                     ? 'bg-blue-500 text-white shadow-md'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed'
                 }`}
                 title={tool.label}
               >

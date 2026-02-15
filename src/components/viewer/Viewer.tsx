@@ -7,7 +7,7 @@ import { PdfViewer } from './PdfViewer';
 import { AnnotationPanel } from './AnnotationPanel';
 import type { OutlineItem } from '../../utils/pdf';
 import type { Tab } from '../../hooks/useTabs';
-
+import type { Annotation, HighlightColor } from '../../types/annotation';
 import { useAnnotations } from '../../hooks/useAnnotations';
 
 interface ViewerProps {
@@ -15,25 +15,32 @@ interface ViewerProps {
   activeTabId: string | null;
   onTabChange: (tabId: string) => void;
   onTabClose: (tabId: string) => void;
-  onOpenFile?: (file: File | string) => void;
+  onTabUpdate: (
+    tabId: string,
+    updates: Partial<Omit<Tab, 'id' | 'file' | 'fileName' | 'annotationKey'>>
+  ) => void;
 }
 
-export function Viewer({ 
-  tabs, 
-  activeTabId, 
-  onTabChange, 
+const SCALE_STEP = 0.25;
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 4;
+
+export function Viewer({
+  tabs,
+  activeTabId,
+  onTabChange,
   onTabClose,
+  onTabUpdate,
 }: ViewerProps) {
   const [totalPages, setTotalPages] = useState(0);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
-  const [isSidebarOpen] = useState(true);
-  const [showAnnotations] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
 
-  // 获取当前激活的标签页
-  const activeTab = tabs.find(t => t.id === activeTabId) || null;
+  const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
-  // 使用文件路径作为 annotations 的 key
-  const fileId = activeTab ? (typeof activeTab.file === 'string' ? activeTab.file : activeTab.file.name) : null;
+  const fileId = activeTab?.annotationKey ?? null;
   const {
     annotations,
     addHighlight,
@@ -42,64 +49,120 @@ export function Viewer({
     getAllAnnotations,
   } = useAnnotations(fileId);
 
-  // 处理文档加载
+  useEffect(() => {
+    setSelectedAnnotationId(null);
+    setShowAnnotations(false);
+  }, [activeTabId]);
+
   const handleDocumentLoad = useCallback((pages: number, pdfOutline: OutlineItem[]) => {
     setTotalPages(pages);
     setOutline(pdfOutline);
-  }, []);
 
-  // 处理页面变化
-  const handlePageChange = useCallback((_page: number) => {
-    // 这里需要通知父组件更新 tab 的 currentPage
-    // 暂时先不做状态同步，只在 PdfViewer 内部处理
-  }, []);
+    if (activeTab && activeTab.currentPage > pages) {
+      onTabUpdate(activeTab.id, { currentPage: pages });
+    }
+  }, [activeTab, onTabUpdate]);
 
-  // 处理缩放
+  const handlePageChange = useCallback((page: number) => {
+    if (!activeTab) {
+      return;
+    }
+
+    const pageLimit = totalPages > 0 ? totalPages : 1;
+    const nextPage = Math.max(1, Math.min(page, pageLimit));
+
+    if (nextPage !== activeTab.currentPage) {
+      onTabUpdate(activeTab.id, { currentPage: nextPage });
+    }
+  }, [activeTab, onTabUpdate, totalPages]);
+
+  const handlePrevPage = useCallback(() => {
+    if (!activeTab) {
+      return;
+    }
+
+    handlePageChange(activeTab.currentPage - 1);
+  }, [activeTab, handlePageChange]);
+
+  const handleNextPage = useCallback(() => {
+    if (!activeTab) {
+      return;
+    }
+
+    handlePageChange(activeTab.currentPage + 1);
+  }, [activeTab, handlePageChange]);
+
   const handleZoomIn = useCallback(() => {
-    // 同上，需要通知父组件
-  }, []);
+    if (!activeTab) {
+      return;
+    }
+
+    const nextScale = Math.min(activeTab.scale + SCALE_STEP, MAX_SCALE);
+    if (nextScale !== activeTab.scale) {
+      onTabUpdate(activeTab.id, { scale: nextScale });
+    }
+  }, [activeTab, onTabUpdate]);
 
   const handleZoomOut = useCallback(() => {
-    // 同上，需要通知父组件
-  }, []);
+    if (!activeTab) {
+      return;
+    }
 
-  // 处理高亮添加
+    const nextScale = Math.max(activeTab.scale - SCALE_STEP, MIN_SCALE);
+    if (nextScale !== activeTab.scale) {
+      onTabUpdate(activeTab.id, { scale: nextScale });
+    }
+  }, [activeTab, onTabUpdate]);
+
   const handleAddHighlight = useCallback((
-    page: number, 
-    selectedText: string, 
+    page: number,
+    selectedText: string,
+    color: HighlightColor,
     rects: Array<{ left: number; top: number; width: number; height: number }>
   ) => {
-    addHighlight(page, selectedText, 'yellow', rects);
+    const annotation = addHighlight(page, selectedText, color, rects);
+    setShowAnnotations(true);
+    setSelectedAnnotationId(annotation.id);
   }, [addHighlight]);
 
-  // 处理批注点击跳转
-  const handleAnnotationPageChange = useCallback((_page: number) => {
-    // 需要通知 PdfViewer 跳转页面
-    // 这个需要通过 ref 或状态提升来实现
-  }, []);
+  const handleAnnotationPageChange = useCallback((page: number) => {
+    handlePageChange(page);
+  }, [handlePageChange]);
 
-  // 键盘导航
+  const handleHighlightClick = useCallback((annotation: Annotation) => {
+    setShowAnnotations(true);
+    setSelectedAnnotationId(annotation.id);
+    handlePageChange(annotation.page);
+  }, [handlePageChange]);
+
+  const handleDeleteAnnotation = useCallback((annotationId: string) => {
+    deleteAnnotation(annotationId);
+    if (selectedAnnotationId === annotationId) {
+      setSelectedAnnotationId(null);
+    }
+  }, [deleteAnnotation, selectedAnnotationId]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeTab) return;
-      
-      // 避免在输入框中时触发
+
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
 
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-        // 上一页
+        e.preventDefault();
+        handlePrevPage();
       } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-        // 下一页
+        e.preventDefault();
+        handleNextPage();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab]);
+  }, [activeTab, handlePrevPage, handleNextPage]);
 
-  // 如果没有打开的文件，显示空状态
   if (tabs.length === 0) {
     return (
       <div className="flex-1 flex flex-col h-screen bg-[#f6f7f8]">
@@ -121,7 +184,6 @@ export function Viewer({
 
   return (
     <div className="flex-1 flex flex-col h-screen bg-[#f6f7f8]">
-      {/* 标签页栏 */}
       <div className="bg-white border-b border-slate-200 flex items-center overflow-x-auto">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
@@ -139,15 +201,13 @@ export function Viewer({
                 }
               `}
             >
-              {/* 激活指示器 */}
               {isActive && (
                 <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-500" />
               )}
-              
+
               <FileText className="w-4 h-4 shrink-0" />
               <span className="text-sm truncate flex-1">{tab.fileName}</span>
-              
-              {/* 关闭按钮 */}
+
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -166,10 +226,8 @@ export function Viewer({
         })}
       </div>
 
-      {/* 主内容区域 */}
       {activeTab && (
         <>
-          {/* 顶部工具栏 */}
           <ReaderToolbar
             fileName={activeTab.fileName}
             scale={activeTab.scale}
@@ -178,9 +236,7 @@ export function Viewer({
             onClose={() => onTabClose(activeTab.id)}
           />
 
-          {/* 主要内容 */}
           <div className="flex-1 flex overflow-hidden">
-            {/* 左侧边栏 - 目录 */}
             {isSidebarOpen && (
               <ReaderSidebar
                 outline={outline}
@@ -190,7 +246,6 @@ export function Viewer({
               />
             )}
 
-            {/* 中间 - PDF 阅读器 */}
             <div className="flex-1 relative">
               <PdfViewer
                 file={activeTab.file}
@@ -199,18 +254,22 @@ export function Viewer({
                 annotations={annotations}
                 onDocumentLoad={handleDocumentLoad}
                 onAddHighlight={handleAddHighlight}
+                onHighlightClick={handleHighlightClick}
+                interactiveHighlights={showAnnotations}
               />
-              
-              {/* 浮动工具栏 */}
+
               <FloatingToolbar
                 currentPage={activeTab.currentPage}
                 totalPages={totalPages}
-                onPrevPage={() => {}}
-                onNextPage={() => {}}
+                onPrevPage={handlePrevPage}
+                onNextPage={handleNextPage}
+                showAnnotations={showAnnotations}
+                onToggleAnnotations={() => setShowAnnotations((prev) => !prev)}
+                showContents={isSidebarOpen}
+                onToggleContents={() => setIsSidebarOpen((prev) => !prev)}
               />
             </div>
 
-            {/* 右侧边栏 - 批注列表 */}
             {showAnnotations && (
               <div className="w-80 bg-white border-l border-slate-200 flex flex-col">
                 <div className="px-4 py-3 border-b border-slate-200">
@@ -220,8 +279,10 @@ export function Viewer({
                   annotations={getAllAnnotations()}
                   currentPage={activeTab.currentPage}
                   onPageChange={handleAnnotationPageChange}
-                  onDelete={deleteAnnotation}
+                  onDelete={handleDeleteAnnotation}
                   onUpdateComment={updateComment}
+                  selectedAnnotationId={selectedAnnotationId}
+                  onSelectAnnotation={setSelectedAnnotationId}
                 />
               </div>
             )}

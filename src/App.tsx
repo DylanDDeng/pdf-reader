@@ -17,6 +17,7 @@ function App() {
     openFile,
     closeTab,
     switchTab,
+    updateTab,
   } = useTabs();
 
   // Use the library hook for managing PDF library
@@ -109,7 +110,7 @@ function App() {
           activeTabId={activeTabId}
           onTabChange={switchTab}
           onTabClose={handleTabClose}
-          onOpenFile={handleOpenFile}
+          onTabUpdate={updateTab}
         />
       )}
     </div>

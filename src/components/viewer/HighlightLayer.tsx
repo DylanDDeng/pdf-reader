@@ -8,6 +8,7 @@ interface HighlightLayerProps {
   scale: number;
   pageWidth: number;
   pageHeight: number;
+  interactive?: boolean;
   onAnnotationClick?: (annotation: Annotation) => void;
 }
 
@@ -17,6 +18,7 @@ export function HighlightLayer({
   scale,
   pageWidth,
   pageHeight,
+  interactive = false,
   onAnnotationClick,
 }: HighlightLayerProps) {
   const pageAnnotations = useMemo(() => {
@@ -33,13 +35,13 @@ export function HighlightLayer({
       style={{ width: pageWidth, height: pageHeight }}
     >
       {pageAnnotations.map((annotation) => (
-        <div key={annotation.id} className="pointer-events-auto">
+        <div key={annotation.id}>
           {annotation.rects.map((rect, index) => {
             const color = HIGHLIGHT_COLORS[annotation.color];
             return (
               <div
                 key={`${annotation.id}-${index}`}
-                className="absolute cursor-pointer transition-opacity hover:opacity-80"
+                className={`absolute transition-opacity hover:opacity-80 ${interactive ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
                 style={{
                   left: rect.left * scale,
                   top: rect.top * scale,

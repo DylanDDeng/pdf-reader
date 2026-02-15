@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Trash2, Edit3, Highlighter } from 'lucide-react';
 import type { Annotation } from '../../types/annotation';
 import { HIGHLIGHT_COLORS } from '../../types/annotation';
@@ -9,6 +9,8 @@ interface AnnotationPanelProps {
   onPageChange: (page: number) => void;
   onDelete: (id: string) => void;
   onUpdateComment: (id: string, comment: string) => void;
+  selectedAnnotationId?: string | null;
+  onSelectAnnotation?: (annotationId: string) => void;
 }
 
 export function AnnotationPanel({
@@ -17,9 +19,12 @@ export function AnnotationPanel({
   onPageChange,
   onDelete,
   onUpdateComment,
+  selectedAnnotationId,
+  onSelectAnnotation,
 }: AnnotationPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
 
   const sortedAnnotations = [...annotations].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -41,6 +46,17 @@ export function AnnotationPanel({
     setEditText('');
   };
 
+  useEffect(() => {
+    if (!selectedAnnotationId || !listRef.current) {
+      return;
+    }
+
+    const target = listRef.current.querySelector<HTMLDivElement>(`[data-annotation-id="${selectedAnnotationId}"]`);
+    if (target) {
+      target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedAnnotationId]);
+
   if (sortedAnnotations.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full py-12 text-center">
@@ -57,20 +73,27 @@ export function AnnotationPanel({
 
   return (
     <div className="flex-1 overflow-y-auto px-3 pb-4">
-      <div className="space-y-3">
+      <div className="space-y-3" ref={listRef}>
         {sortedAnnotations.map((ann) => {
           const color = HIGHLIGHT_COLORS[ann.color];
           const isEditing = editingId === ann.id;
+          const isSelected = selectedAnnotationId === ann.id;
 
           return (
             <div
               key={ann.id}
+              data-annotation-id={ann.id}
               className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                currentPage === ann.page
+                isSelected
+                  ? 'bg-blue-50 border-blue-300 shadow-sm'
+                  : currentPage === ann.page
                   ? 'bg-white border-slate-200 shadow-sm'
                   : 'bg-slate-50 border-transparent hover:bg-white hover:border-slate-200'
               }`}
-              onClick={() => onPageChange(ann.page)}
+              onClick={() => {
+                onSelectAnnotation?.(ann.id);
+                onPageChange(ann.page);
+              }}
             >
               {/* Header: Color indicator + Page */}
               <div className="flex items-center gap-2 mb-2">

@@ -4,6 +4,7 @@ export interface Tab {
   id: string;
   file: File | string;
   fileName: string;
+  annotationKey: string;
   currentPage: number;
   scale: number;
   // 用于恢复滚动位置等
@@ -29,9 +30,18 @@ export function useTabs() {
     return file.name;
   }, []);
 
+  const getAnnotationKey = useCallback((file: File | string): string => {
+    if (typeof file === 'string') {
+      return `path:${file}`;
+    }
+
+    return `file:${file.name}:${file.size}:${file.lastModified}`;
+  }, []);
+
   // 打开新文件（添加标签页）
   const openFile = useCallback((file: File | string) => {
     const fileName = getFileName(file);
+    const annotationKey = getAnnotationKey(file);
     
     // 检查是否已打开
     const existingTab = tabs.find(t => {
@@ -55,6 +65,7 @@ export function useTabs() {
       id: generateTabId(),
       file,
       fileName,
+      annotationKey,
       currentPage: 1,
       scale: 1.0,
     };
@@ -62,7 +73,7 @@ export function useTabs() {
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
     return newTab.id;
-  }, [tabs, generateTabId, getFileName]);
+  }, [tabs, generateTabId, getFileName, getAnnotationKey]);
 
   // 关闭标签页
   const closeTab = useCallback((tabId: string) => {
@@ -86,7 +97,7 @@ export function useTabs() {
   }, []);
 
   // 更新标签页状态
-  const updateTab = useCallback((tabId: string, updates: Partial<Omit<Tab, 'id' | 'file' | 'fileName'>>) => {
+  const updateTab = useCallback((tabId: string, updates: Partial<Omit<Tab, 'id' | 'file' | 'fileName' | 'annotationKey'>>) => {
     setTabs(prev => prev.map(tab => 
       tab.id === tabId ? { ...tab, ...updates } : tab
     ));
