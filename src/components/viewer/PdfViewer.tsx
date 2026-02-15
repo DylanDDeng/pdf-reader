@@ -54,6 +54,8 @@ interface SelectionInfo {
 
 const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 };
 const SCROLL_SYNC_DELAY_MS = 420;
+const CANVAS_BUFFER_VIEWPORTS = 2.5;
+const TEXT_BUFFER_VIEWPORTS = 0.9;
 
 export function PdfViewer({
   file,
@@ -79,7 +81,15 @@ export function PdfViewer({
   const isProgrammaticScrollRef = useRef(false);
   const pageChangeFromScrollRef = useRef<number | null>(null);
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionRenderUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionRenderLockRef = useRef(false);
+  const suppressSelectionEventsRef = useRef(false);
+  const pendingReadyPageRef = useRef<number | null>(null);
   const lastSelectionKeyRef = useRef('');
+  const canvasRenderLocksRef = useRef<Map<number, Promise<void>>>(new Map());
+  const textRenderLocksRef = useRef<Map<number, Promise<void>>>(new Map());
+  const renderedCanvasScaleRef = useRef<Map<number, number>>(new Map());
+  const renderedTextScaleRef = useRef<Map<number, number>>(new Map());
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -111,6 +121,18 @@ export function PdfViewer({
     setSelectedText('');
     setSelectedRects([]);
   }, []);
+
+  const resetRenderCaches = useCallback((clearSizes: boolean = false) => {
+    canvasRenderLocksRef.current.clear();
+    textRenderLocksRef.current.clear();
+    renderedCanvasScaleRef.current.clear();
+    renderedTextScaleRef.current.clear();
+    destroyTextLayerTasks();
+    setRenderedPages({});
+    if (clearSizes) {
+      setPageSizes({});
+    }
+  }, [destroyTextLayerTasks]);
 
   const setPageRefs = useCallback((pageNumber: number, partial: Partial<PageRefs>) => {
     const prev = pageRefsRef.current.get(pageNumber) ?? {
@@ -156,10 +178,8 @@ export function PdfViewer({
       setIsLoading(true);
       setError(null);
       setPageCount(0);
-      setPageSizes({});
-      setRenderedPages({});
       pageRefsRef.current.clear();
-      destroyTextLayerTasks();
+      resetRenderCaches(true);
       resetSelectionState(true);
 
       try {
@@ -206,7 +226,7 @@ export function PdfViewer({
     return () => {
       isMounted = false;
       renderSeqRef.current += 1;
-      destroyTextLayerTasks();
+      resetRenderCaches(true);
       if (documentRef.current) {
         documentRef.current.destroy();
         documentRef.current = null;
@@ -214,82 +234,328 @@ export function PdfViewer({
       if (selectionTimeoutRef.current) {
         clearTimeout(selectionTimeoutRef.current);
       }
+      if (selectionRenderUnlockTimerRef.current) {
+        clearTimeout(selectionRenderUnlockTimerRef.current);
+      }
+      suppressSelectionEventsRef.current = false;
+      pendingReadyPageRef.current = null;
       if (scrollRafRef.current !== null) {
         cancelAnimationFrame(scrollRafRef.current);
         scrollRafRef.current = null;
       }
     };
-  }, [destroyTextLayerTasks, file, resetSelectionState]);
+  }, [file, resetRenderCaches, resetSelectionState]);
 
-  useEffect(() => {
+  const ensurePageCanvas = useCallback(async (pageNumber: number, expectedRenderSeq: number) => {
+    if (expectedRenderSeq !== renderSeqRef.current) {
+      return;
+    }
     const doc = documentRef.current;
-    if (!doc || pageCount === 0) {
+    if (!doc) {
+      return;
+    }
+    const cachedScale = renderedCanvasScaleRef.current.get(pageNumber);
+    if (cachedScale === scale) {
       return;
     }
 
-    let cancelled = false;
-    const renderSeq = ++renderSeqRef.current;
-    destroyTextLayerTasks();
-    setRenderedPages({});
-
-    const renderAllPages = async () => {
-      for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-        if (cancelled || renderSeq !== renderSeqRef.current) {
-          return;
-        }
-
-        try {
-          const page = await doc.getPage(pageNumber);
-          if (cancelled || renderSeq !== renderSeqRef.current) {
-            return;
-          }
-
-          const viewport = page.getViewport({ scale });
-          setPageSizes((prev) => {
-            const currentSize = prev[pageNumber];
-            if (
-              currentSize &&
-              Math.abs(currentSize.width - viewport.width) < 0.1 &&
-              Math.abs(currentSize.height - viewport.height) < 0.1
-            ) {
-              return prev;
-            }
-            return {
-              ...prev,
-              [pageNumber]: { width: viewport.width, height: viewport.height },
-            };
-          });
-
-          const refs = await waitForPageRefs(pageNumber, renderSeq);
-          if (!refs?.canvas || !refs.textLayerContainer) {
-            continue;
-          }
-
-          await renderPage(page, refs.canvas, scale);
-          if (cancelled || renderSeq !== renderSeqRef.current) {
-            return;
-          }
-
-          const previousTask = textLayerTasksRef.current.get(pageNumber) ?? null;
-          const nextTask = await renderTextLayer(page, refs.textLayerContainer, scale, previousTask);
-          nextTask.element.dataset.pageNumber = String(pageNumber);
-          textLayerTasksRef.current.set(pageNumber, nextTask);
-          setRenderedPages((prev) => (prev[pageNumber] ? prev : { ...prev, [pageNumber]: true }));
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          if (!message.includes('TextLayer task cancelled')) {
-            console.error(`Error rendering page ${pageNumber}:`, err);
-          }
-        }
+    const inFlight = canvasRenderLocksRef.current.get(pageNumber);
+    if (inFlight) {
+      try {
+        await inFlight;
+      } catch {
+        // Ignore and allow follow-up attempts in next render cycle.
       }
-    };
+      return;
+    }
 
-    void renderAllPages();
+    const task = (async () => {
+      const page = await doc.getPage(pageNumber);
+      if (expectedRenderSeq !== renderSeqRef.current) {
+        return;
+      }
 
-    return () => {
-      cancelled = true;
+      const viewport = page.getViewport({ scale });
+      setPageSizes((prev) => {
+        const currentSize = prev[pageNumber];
+        if (
+          currentSize &&
+          Math.abs(currentSize.width - viewport.width) < 0.1 &&
+          Math.abs(currentSize.height - viewport.height) < 0.1
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [pageNumber]: { width: viewport.width, height: viewport.height },
+        };
+      });
+
+      const refs = await waitForPageRefs(pageNumber, expectedRenderSeq);
+      if (!refs?.canvas) {
+        return;
+      }
+
+      await renderPage(page, refs.canvas, scale);
+      if (expectedRenderSeq !== renderSeqRef.current) {
+        return;
+      }
+
+      renderedCanvasScaleRef.current.set(pageNumber, scale);
+      setRenderedPages((prev) => (prev[pageNumber] ? prev : { ...prev, [pageNumber]: true }));
+    })();
+
+    canvasRenderLocksRef.current.set(pageNumber, task);
+    try {
+      await task;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('TextLayer task cancelled')) {
+        console.error(`Error rendering canvas for page ${pageNumber}:`, err);
+      }
+    } finally {
+      if (canvasRenderLocksRef.current.get(pageNumber) === task) {
+        canvasRenderLocksRef.current.delete(pageNumber);
+      }
+    }
+  }, [scale, waitForPageRefs]);
+
+  const ensurePageTextLayer = useCallback(async (pageNumber: number, expectedRenderSeq: number) => {
+    if (deleteMode || expectedRenderSeq !== renderSeqRef.current) {
+      return;
+    }
+    const doc = documentRef.current;
+    if (!doc) {
+      return;
+    }
+    const cachedScale = renderedTextScaleRef.current.get(pageNumber);
+    if (cachedScale === scale) {
+      return;
+    }
+
+    const inFlight = textRenderLocksRef.current.get(pageNumber);
+    if (inFlight) {
+      try {
+        await inFlight;
+      } catch {
+        // Ignore and allow follow-up attempts in next render cycle.
+      }
+      return;
+    }
+
+    const task = (async () => {
+      const page = await doc.getPage(pageNumber);
+      if (expectedRenderSeq !== renderSeqRef.current) {
+        return;
+      }
+
+      const refs = await waitForPageRefs(pageNumber, expectedRenderSeq);
+      if (!refs?.textLayerContainer) {
+        return;
+      }
+
+      const previousTask = textLayerTasksRef.current.get(pageNumber) ?? null;
+      const nextTask = await renderTextLayer(page, refs.textLayerContainer, scale, previousTask);
+      nextTask.element.dataset.pageNumber = String(pageNumber);
+      textLayerTasksRef.current.set(pageNumber, nextTask);
+      renderedTextScaleRef.current.set(pageNumber, scale);
+    })();
+
+    textRenderLocksRef.current.set(pageNumber, task);
+    try {
+      await task;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('TextLayer task cancelled')) {
+        console.error(`Error rendering text layer for page ${pageNumber}:`, err);
+      }
+    } finally {
+      if (textRenderLocksRef.current.get(pageNumber) === task) {
+        textRenderLocksRef.current.delete(pageNumber);
+      }
+    }
+  }, [deleteMode, scale, waitForPageRefs]);
+
+  const isPageTextLayerReady = useCallback((pageNumber: number, layer?: HTMLDivElement | null): boolean => {
+    if (!Number.isFinite(pageNumber) || pageNumber < 1) {
+      return false;
+    }
+    if (layer && !layer.isConnected) {
+      return false;
+    }
+    if (renderedTextScaleRef.current.get(pageNumber) !== scale) {
+      return false;
+    }
+    if (textRenderLocksRef.current.has(pageNumber)) {
+      return false;
+    }
+    const task = textLayerTasksRef.current.get(pageNumber);
+    if (!task || !task.element.isConnected) {
+      return false;
+    }
+    return true;
+  }, [scale]);
+
+  const collectRenderTargets = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || pageCount === 0) {
+      return {
+        canvas: [] as number[],
+        text: new Set<number>(),
+      };
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const viewportHeight = container.clientHeight;
+    const canvasTop = containerRect.top - viewportHeight * CANVAS_BUFFER_VIEWPORTS;
+    const canvasBottom = containerRect.bottom + viewportHeight * CANVAS_BUFFER_VIEWPORTS;
+    const textTop = containerRect.top - viewportHeight * TEXT_BUFFER_VIEWPORTS;
+    const textBottom = containerRect.bottom + viewportHeight * TEXT_BUFFER_VIEWPORTS;
+    const viewportCenter = containerRect.top + viewportHeight / 2;
+
+    const canvasCandidates: Array<{ page: number; distance: number }> = [];
+    const textPages = new Set<number>();
+
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      const card = pageRefsRef.current.get(pageNumber)?.card;
+      if (!card) {
+        continue;
+      }
+
+      const rect = card.getBoundingClientRect();
+      if (rect.bottom >= canvasTop && rect.top <= canvasBottom) {
+        canvasCandidates.push({
+          page: pageNumber,
+          distance: Math.abs((rect.top + rect.bottom) / 2 - viewportCenter),
+        });
+      }
+
+      if (rect.bottom >= textTop && rect.top <= textBottom) {
+        textPages.add(pageNumber);
+      }
+    }
+
+    if (canvasCandidates.length === 0 && currentPageRef.current >= 1) {
+      canvasCandidates.push({ page: currentPageRef.current, distance: 0 });
+      textPages.add(currentPageRef.current);
+    }
+
+    canvasCandidates.sort((a, b) => a.distance - b.distance);
+    return {
+      canvas: canvasCandidates.map((item) => item.page),
+      text: textPages,
     };
-  }, [destroyTextLayerTasks, pageCount, scale, waitForPageRefs]);
+  }, [pageCount]);
+
+  const pruneFarLayers = useCallback((keptCanvas: Set<number>, keptText: Set<number>) => {
+    const pagesToHide: number[] = [];
+
+    textLayerTasksRef.current.forEach((task, pageNumber) => {
+      if (keptText.has(pageNumber)) {
+        return;
+      }
+      if (textRenderLocksRef.current.has(pageNumber)) {
+        return;
+      }
+      task.destroy();
+      textLayerTasksRef.current.delete(pageNumber);
+      renderedTextScaleRef.current.delete(pageNumber);
+    });
+
+    renderedCanvasScaleRef.current.forEach((_scale, pageNumber) => {
+      if (keptCanvas.has(pageNumber)) {
+        return;
+      }
+      if (canvasRenderLocksRef.current.has(pageNumber)) {
+        return;
+      }
+      const refs = pageRefsRef.current.get(pageNumber);
+      if (refs?.canvas) {
+        refs.canvas.width = 0;
+        refs.canvas.height = 0;
+        refs.canvas.style.width = '0px';
+        refs.canvas.style.height = '0px';
+      }
+      renderedCanvasScaleRef.current.delete(pageNumber);
+      pagesToHide.push(pageNumber);
+    });
+
+    if (pagesToHide.length > 0) {
+      setRenderedPages((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const pageNumber of pagesToHide) {
+          if (next[pageNumber]) {
+            delete next[pageNumber];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, []);
+
+  const scheduleVisiblePageRender = useCallback(() => {
+    if (!documentRef.current || pageCount === 0) {
+      return;
+    }
+
+    const selectionLocked = selectionRenderLockRef.current || toolbarPosition !== null;
+    const expectedRenderSeq = renderSeqRef.current;
+    const { canvas, text } = collectRenderTargets();
+    const canvasSet = new Set(canvas);
+
+    const keptText = new Set<number>();
+    if (!deleteMode) {
+      text.forEach((pageNumber) => keptText.add(pageNumber));
+    }
+
+    if (selectedPage) {
+      canvasSet.add(selectedPage);
+      if (!deleteMode) {
+        keptText.add(selectedPage);
+      }
+    }
+
+    if (currentPageRef.current >= 1) {
+      canvasSet.add(currentPageRef.current);
+      if (!deleteMode) {
+        keptText.add(currentPageRef.current);
+      }
+    }
+
+    if (selectionLocked) {
+      textLayerTasksRef.current.forEach((_task, pageNumber) => {
+        keptText.add(pageNumber);
+      });
+    } else {
+      pruneFarLayers(canvasSet, keptText);
+    }
+
+    const orderedCanvas = Array.from(canvasSet).sort((a, b) => {
+      const da = Math.abs(a - currentPageRef.current);
+      const db = Math.abs(b - currentPageRef.current);
+      return da - db;
+    });
+
+    for (const pageNumber of orderedCanvas) {
+      void ensurePageCanvas(pageNumber, expectedRenderSeq);
+    }
+
+    if (deleteMode || selectionLocked) {
+      return;
+    }
+
+    const orderedText = Array.from(keptText).sort((a, b) => {
+      const da = Math.abs(a - currentPageRef.current);
+      const db = Math.abs(b - currentPageRef.current);
+      return da - db;
+    });
+
+    for (const pageNumber of orderedText) {
+      void ensurePageTextLayer(pageNumber, expectedRenderSeq);
+    }
+  }, [collectRenderTargets, deleteMode, ensurePageCanvas, ensurePageTextLayer, pageCount, pruneFarLayers, selectedPage, toolbarPosition]);
 
   const findPageFromScroll = useCallback(() => {
     if (!onPageChange || isProgrammaticScrollRef.current) {
@@ -317,35 +583,34 @@ export function PdfViewer({
   }, [onPageChange, pageCount]);
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
+    if (pageCount === 0) {
       return;
     }
+    renderSeqRef.current += 1;
+    resetRenderCaches(true);
+    scheduleVisiblePageRender();
+  }, [pageCount, scale, resetRenderCaches, scheduleVisiblePageRender]);
 
-    const handleScroll = () => {
-      if (isProgrammaticScrollRef.current) {
-        return;
-      }
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current);
-      }
-      scrollRafRef.current = requestAnimationFrame(() => {
-        scrollRafRef.current = null;
-        findPageFromScroll();
-      });
-    };
+  useEffect(() => {
+    if (pageCount === 0) {
+      return;
+    }
+    scheduleVisiblePageRender();
+  }, [deleteMode, pageCount, scheduleVisiblePageRender]);
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current);
-        scrollRafRef.current = null;
-      }
-    };
-  }, [findPageFromScroll, onPageChange]);
+  useEffect(() => {
+    if (deleteMode || pageCount === 0 || currentPage < 1) {
+      return;
+    }
+    const expectedRenderSeq = renderSeqRef.current;
+    void ensurePageTextLayer(currentPage, expectedRenderSeq);
+    if (currentPage > 1) {
+      void ensurePageTextLayer(currentPage - 1, expectedRenderSeq);
+    }
+    if (currentPage < pageCount) {
+      void ensurePageTextLayer(currentPage + 1, expectedRenderSeq);
+    }
+  }, [currentPage, deleteMode, ensurePageTextLayer, pageCount]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -353,37 +618,32 @@ export function PdfViewer({
       return;
     }
 
-    const handleWheel = (event: WheelEvent) => {
-      if (event.ctrlKey) {
-        return;
+    const handleScroll = () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
       }
-      const canScroll = container.scrollHeight > container.clientHeight + 1;
-      if (!canScroll) {
-        return;
-      }
-
-      const deltaY = event.deltaY;
-      if (Math.abs(deltaY) < 0.1) {
-        return;
-      }
-
-      const atTop = container.scrollTop <= 0;
-      const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
-      const scrollingUp = deltaY < 0;
-      const scrollingDown = deltaY > 0;
-      if ((scrollingUp && atTop) || (scrollingDown && atBottom)) {
-        return;
-      }
-
-      container.scrollTop += deltaY;
-      event.preventDefault();
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        if (!isProgrammaticScrollRef.current) {
+          findPageFromScroll();
+        }
+        scheduleVisiblePageRender();
+      });
     };
 
-    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+    handleScroll();
+
     return () => {
-      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
     };
-  }, []);
+  }, [findPageFromScroll, scheduleVisiblePageRender]);
 
   useEffect(() => {
     if (pageCount === 0) {
@@ -432,6 +692,9 @@ export function PdfViewer({
         : node.parentElement;
       const layer = element?.closest('.textLayer') as HTMLDivElement | null;
       if (!layer) {
+        return null;
+      }
+      if (!layer.isConnected) {
         return null;
       }
       const pageAttr = layer.dataset.pageNumber;
@@ -527,6 +790,12 @@ export function PdfViewer({
       }
       return;
     }
+    if (!isPageTextLayerReady(selectionLayer.pageNumber, selectionLayer.layer)) {
+      if (clearOnInvalid) {
+        resetSelectionState();
+      }
+      return;
+    }
 
     const info = getSelectionInfo(selection, selectionLayer.layer);
     if (!info || info.text.length === 0) {
@@ -547,7 +816,7 @@ export function PdfViewer({
     setSelectedText(info.text);
     setSelectedRects(info.rects);
     setToolbarPosition(info.mousePosition);
-  }, [deleteMode, getSelectionInfo, getSelectionLayer, resetSelectionState]);
+  }, [deleteMode, getSelectionInfo, getSelectionLayer, isPageTextLayerReady, resetSelectionState]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -564,12 +833,43 @@ export function PdfViewer({
       if (!layer) {
         return;
       }
+      const pageAttr = (layer as HTMLDivElement).dataset.pageNumber;
+      const pageNumber = pageAttr ? Number.parseInt(pageAttr, 10) : NaN;
+      if (!isPageTextLayerReady(pageNumber, layer as HTMLDivElement)) {
+        suppressSelectionEventsRef.current = true;
+        pendingReadyPageRef.current = Number.isFinite(pageNumber) ? pageNumber : null;
+        resetSelectionState(true);
+        event.preventDefault();
+        event.stopPropagation();
+        if (Number.isFinite(pageNumber) && pageNumber > 0) {
+          void ensurePageTextLayer(pageNumber, renderSeqRef.current).finally(() => {
+            if (pendingReadyPageRef.current === pageNumber) {
+              suppressSelectionEventsRef.current = false;
+              pendingReadyPageRef.current = null;
+            }
+          });
+        }
+        scheduleVisiblePageRender();
+        return;
+      }
 
+      suppressSelectionEventsRef.current = false;
+      pendingReadyPageRef.current = null;
+      selectionRenderLockRef.current = true;
+      if (selectionRenderUnlockTimerRef.current) {
+        clearTimeout(selectionRenderUnlockTimerRef.current);
+        selectionRenderUnlockTimerRef.current = null;
+      }
       isPointerSelectingRef.current = true;
       setToolbarPosition(null);
     };
 
     const handlePointerUp = () => {
+      if (suppressSelectionEventsRef.current) {
+        suppressSelectionEventsRef.current = false;
+        pendingReadyPageRef.current = null;
+        return;
+      }
       if (!isPointerSelectingRef.current) {
         return;
       }
@@ -579,10 +879,18 @@ export function PdfViewer({
       }
       selectionTimeoutRef.current = setTimeout(() => {
         updateSelectionFromWindow(true);
+        selectionRenderUnlockTimerRef.current = setTimeout(() => {
+          selectionRenderLockRef.current = false;
+          selectionRenderUnlockTimerRef.current = null;
+          scheduleVisiblePageRender();
+        }, 120);
       }, 20);
     };
 
     const handleSelectionChange = () => {
+      if (suppressSelectionEventsRef.current) {
+        return;
+      }
       if (isPointerSelectingRef.current) {
         return;
       }
@@ -613,8 +921,15 @@ export function PdfViewer({
       if (selectionTimeoutRef.current) {
         clearTimeout(selectionTimeoutRef.current);
       }
+      if (selectionRenderUnlockTimerRef.current) {
+        clearTimeout(selectionRenderUnlockTimerRef.current);
+      }
+      suppressSelectionEventsRef.current = false;
+      pendingReadyPageRef.current = null;
+      selectionRenderLockRef.current = false;
+      selectionRenderUnlockTimerRef.current = null;
     };
-  }, [deleteMode, updateSelectionFromWindow]);
+  }, [deleteMode, ensurePageTextLayer, isPageTextLayerReady, resetSelectionState, scheduleVisiblePageRender, updateSelectionFromWindow]);
 
   const handleToolbarAction = (action: AnnotationAction) => {
     if (action !== 'highlight' || !selectedText || selectedRects.length === 0 || !selectedPage) {
@@ -638,12 +953,26 @@ export function PdfViewer({
 
   useEffect(() => {
     isPointerSelectingRef.current = false;
+    suppressSelectionEventsRef.current = false;
+    pendingReadyPageRef.current = null;
+    selectionRenderLockRef.current = false;
+    if (selectionRenderUnlockTimerRef.current) {
+      clearTimeout(selectionRenderUnlockTimerRef.current);
+      selectionRenderUnlockTimerRef.current = null;
+    }
     resetSelectionState(true);
   }, [file, scale, resetSelectionState]);
 
   useEffect(() => {
     if (deleteMode) {
       isPointerSelectingRef.current = false;
+      suppressSelectionEventsRef.current = false;
+      pendingReadyPageRef.current = null;
+      selectionRenderLockRef.current = false;
+      if (selectionRenderUnlockTimerRef.current) {
+        clearTimeout(selectionRenderUnlockTimerRef.current);
+        selectionRenderUnlockTimerRef.current = null;
+      }
       resetSelectionState(true);
     }
   }, [deleteMode, resetSelectionState]);
@@ -716,6 +1045,7 @@ export function PdfViewer({
                     style={{
                       display: isRendered ? 'block' : 'none',
                       pointerEvents: deleteMode ? 'none' : 'auto',
+                      zIndex: 3,
                     }}
                   />
 
@@ -730,6 +1060,24 @@ export function PdfViewer({
                       deleteMode={deleteMode}
                       onAnnotationClick={onHighlightClick}
                     />
+                  )}
+
+                  {isRendered && selectedPage === pageNumber && selectedRects.length > 0 && (
+                    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 4 }}>
+                      {selectedRects.map((rect, index) => (
+                        <div
+                          key={`selection-${pageNumber}-${index}`}
+                          className="absolute rounded-[2px]"
+                          style={{
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                            backgroundColor: 'rgba(59, 130, 246, 0.26)',
+                          }}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
 

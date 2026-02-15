@@ -34,7 +34,7 @@ export function HighlightLayer({
   return (
     <div 
       className="absolute top-0 left-0 pointer-events-none"
-      style={{ width: pageWidth, height: pageHeight, zIndex: 2 }}
+      style={{ width: pageWidth, height: pageHeight, zIndex: 1 }}
     >
       {pageAnnotations.map((annotation) => (
         <div key={annotation.id}>
