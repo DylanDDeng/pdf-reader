@@ -1,5 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { loadPdfDocument, renderPage, extractOutline, type OutlineItem, getTextContent, type TextItem } from '../../utils/pdf';
+import {
+  loadPdfDocument,
+  renderPage,
+  renderTextLayer,
+  extractOutline,
+  type OutlineItem,
+  type PdfTextLayerTask,
+} from '../../utils/pdf';
 import { HighlightLayer } from './HighlightLayer';
 import { SelectionToolbar, type AnnotationAction } from './SelectionToolbar';
 import type { Annotation, HighlightColor } from '../../types/annotation';
@@ -46,11 +53,15 @@ export function PdfViewer({
   
   // 用于防止选择事件重复触发
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textLayerTaskRef = useRef<PdfTextLayerTask | null>(null);
+  const renderSeqRef = useRef(0);
 
   const renderCurrentPage = useCallback(async () => {
     if (!documentRef.current || !canvasRef.current || !textLayerRef.current) {
       return;
     }
+
+    const renderSeq = ++renderSeqRef.current;
 
     try {
       const page = await documentRef.current.getPage(currentPage);
@@ -60,101 +71,35 @@ export function PdfViewer({
       
       // Render canvas
       await renderPage(page, canvasRef.current, scale);
+      if (renderSeq !== renderSeqRef.current) {
+        return;
+      }
       
       // Render text layer
-      await renderTextLayer(page, textLayerRef.current, scale);
+      textLayerTaskRef.current = await renderTextLayer(
+        page,
+        textLayerRef.current,
+        scale,
+        textLayerTaskRef.current
+      );
     } catch (err) {
-      console.error('Error rendering page:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('TextLayer task cancelled')) {
+        console.error('Error rendering page:', err);
+      }
     }
   }, [currentPage, scale]);
-
-  const renderTextLayer = async (page: any, container: HTMLDivElement, scale: number) => {
-    const viewport = page.getViewport({ scale });
-    
-    // Clear previous content
-    container.innerHTML = '';
-    container.style.width = `${viewport.width}px`;
-    container.style.height = `${viewport.height}px`;
-    container.style.position = 'absolute';
-    container.style.top = '0';
-    container.style.left = '0';
-    // 关键：确保文本层可交互
-    container.style.cursor = 'text';
-    container.style.userSelect = 'text';
-
-    try {
-      const textContent = await getTextContent(page);
-      
-      // 创建文本片段容器
-      const textItems = textContent.items as TextItem[];
-      
-      // 按行分组文本项（根据 Y 坐标）
-      const lineMap = new Map<number, TextItem[]>();
-      const tolerance = 2; // Y 坐标容差
-      
-      textItems.forEach((item) => {
-        const y = item.transform[5];
-        // 找到接近的 Y 坐标
-        let foundY: number | null = null;
-        for (const [key] of lineMap) {
-          if (Math.abs(key - y) < tolerance) {
-            foundY = key;
-            break;
-          }
-        }
-        
-        if (foundY !== null) {
-          lineMap.get(foundY)!.push(item);
-        } else {
-          lineMap.set(y, [item]);
-        }
-      });
-      
-      // 为每行创建一个容器
-      lineMap.forEach((items, y) => {
-        // 按 X 坐标排序
-        items.sort((a, b) => a.transform[4] - b.transform[4]);
-        
-        // 创建行容器
-        const lineDiv = document.createElement('div');
-        lineDiv.style.position = 'absolute';
-        lineDiv.style.left = '0';
-        lineDiv.style.top = `${viewport.height - y * scale - items[0].height * scale}px`;
-        lineDiv.style.height = `${items[0].height * scale}px`;
-        lineDiv.style.whiteSpace = 'nowrap';
-        
-        // 创建文本 span
-        items.forEach((item) => {
-          const span = document.createElement('span');
-          span.textContent = item.str;
-          span.style.position = 'absolute';
-          span.style.left = `${item.transform[4] * scale}px`;
-          span.style.top = '0';
-          span.style.fontSize = `${item.height * scale}px`;
-          span.style.fontFamily = item.fontName || 'sans-serif';
-          span.style.lineHeight = '1';
-          span.style.color = 'transparent';
-          span.style.userSelect = 'text';
-          span.style.webkitUserSelect = 'text';
-          span.style.cursor = 'text';
-          
-          lineDiv.appendChild(span);
-        });
-        
-        container.appendChild(lineDiv);
-      });
-    } catch (err) {
-      console.error('Error rendering text layer:', err);
-    }
-  };
 
   // Load document
   useEffect(() => {
     let isMounted = true;
+    const loadSeq = ++renderSeqRef.current;
 
     const loadDocument = async () => {
       setIsLoading(true);
       setError(null);
+      textLayerTaskRef.current?.destroy();
+      textLayerTaskRef.current = null;
       // 清除之前的选择状态
       setToolbarPosition(null);
       setSelectedText('');
@@ -187,14 +132,26 @@ export function PdfViewer({
             setPageSize({ width: viewport.width, height: viewport.height });
             
             await renderPage(page, canvasRef.current, scale);
-            await renderTextLayer(page, textLayerRef.current, scale);
+            if (loadSeq === renderSeqRef.current) {
+              textLayerTaskRef.current = await renderTextLayer(
+                page,
+                textLayerRef.current,
+                scale,
+                textLayerTaskRef.current
+              );
+            }
           }
         }
       } catch (err) {
-        console.error('Error loading PDF:', err);
+        const message = err instanceof Error ? err.message : String(err);
+        const isCancelled = message.includes('TextLayer task cancelled');
+        if (!isCancelled) {
+          console.error('Error loading PDF:', err);
+        }
         if (isMounted) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          setError(`Failed to load PDF: ${errorMessage}`);
+          if (!isCancelled) {
+            setError(`Failed to load PDF: ${message}`);
+          }
         }
       } finally {
         if (isMounted) {
@@ -207,6 +164,9 @@ export function PdfViewer({
 
     return () => {
       isMounted = false;
+      renderSeqRef.current += 1;
+      textLayerTaskRef.current?.destroy();
+      textLayerTaskRef.current = null;
       if (documentRef.current) {
         documentRef.current.destroy();
         documentRef.current = null;

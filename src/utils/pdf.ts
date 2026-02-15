@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { TextLayerBuilder } from 'pdfjs-dist/web/pdf_viewer.mjs';
 
 // Set the worker source - uses the file copied to public folder
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -87,6 +88,59 @@ export async function renderPage(
 
   const renderTask = page.render(renderContext);
   await renderTask.promise;
+}
+
+export interface PdfTextLayerTask {
+  cancel: () => void;
+  destroy: () => void;
+}
+
+export async function renderTextLayer(
+  page: pdfjsLib.PDFPageProxy,
+  container: HTMLDivElement,
+  scale: number = 1.0,
+  previousLayer?: PdfTextLayerTask | null
+): Promise<PdfTextLayerTask> {
+  previousLayer?.destroy();
+
+  container.innerHTML = '';
+
+  const viewport = page.getViewport({ scale });
+  container.style.width = `${viewport.width}px`;
+  container.style.height = `${viewport.height}px`;
+  container.style.setProperty('--scale-factor', String(scale));
+  container.style.setProperty('--user-unit', String(viewport.userUnit ?? 1));
+  container.style.setProperty('--total-scale-factor', 'calc(var(--scale-factor) * var(--user-unit))');
+  const textLayerBuilder = new TextLayerBuilder({
+    pdfPage: page,
+    onAppend: (textLayerDiv: HTMLDivElement) => {
+      container.append(textLayerDiv);
+    },
+  });
+
+  try {
+    await textLayerBuilder.render({
+      viewport,
+      textContentParams: {
+        includeMarkedContent: true,
+        disableNormalization: true,
+      },
+    });
+  } catch (err) {
+    textLayerBuilder.cancel();
+    container.innerHTML = '';
+    throw err;
+  }
+
+  return {
+    cancel: () => {
+      textLayerBuilder.cancel();
+    },
+    destroy: () => {
+      textLayerBuilder.cancel();
+      container.innerHTML = '';
+    },
+  };
 }
 
 export interface TextItem {
