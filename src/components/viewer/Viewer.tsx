@@ -273,6 +273,7 @@ export function Viewer({
           <div className="flex-1 flex overflow-hidden min-h-0">
             {isSidebarOpen && (
               <ReaderSidebar
+                file={activeTab.file}
                 fileName={activeTab.fileName}
                 outline={outline}
                 currentPage={activeTab.currentPage}
