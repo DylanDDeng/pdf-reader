@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Search, Grid, List, FolderPlus, Star, Clock, Upload } from 'lucide-react';
+import { Search, Grid, List, FolderPlus, Upload } from 'lucide-react';
 import { FileCard } from './FileCard';
 import { ImportModal } from './ImportModal';
 import { ImportProgress } from './ImportProgress';
@@ -39,38 +39,31 @@ export function LibraryView({
   const [importResult, setImportResult] = useState<ImportResultType | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Track previous triggerImport value to detect changes
   const prevTriggerImportRef = useRef(triggerImport);
 
-  // Listen for import trigger from sidebar
   useEffect(() => {
-    // Only trigger if the value has changed (increased)
     if (triggerImport !== prevTriggerImportRef.current && triggerImport && triggerImport > 0) {
       setShowImportModal(true);
     }
     prevTriggerImportRef.current = triggerImport;
   }, [triggerImport]);
 
-  // Filter items based on search and favorites
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       searchQuery === '' ||
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.path.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesFavorites = !showFavorites || item.favorite;
+    const matchesFavorites = !showFavorites || Boolean(item.favorite);
 
     return matchesSearch && matchesFavorites;
   });
 
-  // Sort items by last opened
   const sortedItems = [...filteredItems].sort((a, b) => {
     return new Date(b.lastOpened).getTime() - new Date(a.lastOpened).getTime();
   });
 
-  // Favorites
-  const favoriteItems = sortedItems.filter((item) => item.favorite);
-  const recentItems = sortedItems.filter((item) => !item.favorite);
+  const favoritesCount = items.filter((item) => item.favorite).length;
 
   const handleImport = useCallback(
     async (files: ScannedFile[]) => {
@@ -87,7 +80,6 @@ export function LibraryView({
     [onImportFiles]
   );
 
-  // 处理拖拽事件
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -106,11 +98,10 @@ export function LibraryView({
     setIsDragOver(false);
 
     const files = Array.from(e.dataTransfer.files).filter(
-      file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+      (file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     );
 
     if (files.length > 0 && onOpenFile) {
-      // 打开第一个 PDF 文件
       onOpenFile(files[0]);
     }
   }, [onOpenFile]);
@@ -123,250 +114,138 @@ export function LibraryView({
 
     if (diffDays === 0) {
       return 'Today';
-    } else if (diffDays === 1) {
-      return 'Yesterday';
-    } else if (diffDays < 7) {
-      return `${diffDays} days ago`;
-    } else {
-      return date.toLocaleDateString();
     }
+    if (diffDays === 1) {
+      return 'Yesterday';
+    }
+    if (diffDays < 7) {
+      return `${diffDays} days ago`;
+    }
+    return date.toLocaleDateString();
   };
 
   return (
-    <div 
-      className="flex-1 h-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-[#f6f7f8] dark:bg-background-dark relative"
+    <div
+      className="archive-library h-full min-h-0 min-w-0 overflow-hidden flex flex-col relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* 拖拽遮罩 */}
       {isDragOver && (
-        <div className="absolute inset-0 bg-blue-500/10 border-4 border-blue-500 border-dashed z-50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
-            <Upload className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-slate-800 mb-2">释放以打开 PDF</h3>
-            <p className="text-slate-500">将文件拖放到此处即可打开阅读</p>
+        <div className="absolute inset-0 z-50 grid place-items-center bg-[rgba(59,130,196,0.08)] border-4 border-dashed border-[var(--archive-blue)]">
+          <div className="bg-white rounded-2xl shadow-xl p-8 text-center border border-black/10">
+            <Upload className="w-12 h-12 text-[var(--archive-blue)] mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-[var(--archive-ink-black)] mb-2">Drop to open PDF</h3>
+            <p className="text-[var(--archive-ink-grey)]">将文件拖放到这里，立即开始阅读</p>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <header className="h-16 bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-6">
-        <h1 className="text-xl font-semibold text-slate-800 dark:text-white">Library</h1>
+      <header className="archive-top-bar">
+        <div className="archive-search-container">
+          <Search className="archive-search-icon" />
+          <input
+            type="text"
+            placeholder="Search archive..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="archive-search-input"
+          />
+        </div>
 
-        <div className="flex items-center gap-4">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search files..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-64 pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border border-transparent rounded-lg text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {/* Favorites Filter */}
+        <div className="archive-view-controls">
           <button
-            onClick={() => setShowFavorites(!showFavorites)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              showFavorites
-                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
-                : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
+            onClick={() => setViewMode('grid')}
+            className={`archive-btn-text ${viewMode === 'grid' ? 'archive-btn-primary' : ''}`}
           >
-            <Star className={`w-4 h-4 ${showFavorites ? 'fill-current' : ''}`} />
-            <span className="hidden sm:inline">Favorites</span>
+            <Grid className="w-3.5 h-3.5" />
+            Grid
           </button>
-
-          {/* View Toggle */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'grid'
-                  ? 'bg-white dark:bg-slate-700 text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <Grid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'list'
-                  ? 'bg-white dark:bg-slate-700 text-primary shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            onClick={() => setViewMode('list')}
+            className={`archive-btn-text ${viewMode === 'list' ? 'archive-btn-primary' : ''}`}
+          >
+            <List className="w-3.5 h-3.5" />
+            List
+          </button>
+          <button
+            onClick={() => setShowFavorites((prev) => !prev)}
+            className={`archive-btn-text ${showFavorites ? 'archive-btn-primary' : ''}`}
+          >
+            Filter +
+          </button>
         </div>
       </header>
 
-      {/* Content */}
-      <main className="flex-1 overflow-auto p-6">
-        {/* Sync Notification */}
+      <main className="archive-content-scroll">
         {lastSyncResult && lastSyncResult.removedCount > 0 && (
-          <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-2 text-sm text-amber-800 dark:text-amber-200">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>
-              Cleaned up {lastSyncResult.removedCount} file{lastSyncResult.removedCount !== 1 ? 's' : ''} that no longer exist on disk.
-            </span>
+          <div className="mb-6 rounded-lg border border-[var(--archive-rust)]/30 bg-[var(--archive-rust)]/8 px-3 py-2 text-sm text-[var(--archive-ink-black)]">
+            Cleaned up {lastSyncResult.removedCount} missing file{lastSyncResult.removedCount !== 1 ? 's' : ''} from library.
           </div>
         )}
 
-        {/* Empty State */}
+        <div className="mb-10">
+          <h1 className="text-[2rem] leading-tight font-medium tracking-[-0.02em] text-[var(--archive-ink-black)]">
+            Library Overview
+          </h1>
+          <p className="mt-2 text-[15px] text-[var(--archive-ink-grey)]">
+            {showFavorites
+              ? `Favorites view · ${favoritesCount} saved`
+              : `All documents · ${items.length} files`}
+          </p>
+        </div>
+
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-              <svg
-                className="w-12 h-12 text-slate-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+          <div className="grid place-items-center py-24 text-center">
+            <div>
+              <div className="w-20 h-20 mx-auto mb-4 rounded-full border border-black/10 bg-white grid place-items-center">
+                <FolderPlus className="w-9 h-9 text-[var(--archive-ink-grey)]" />
+              </div>
+              <h2 className="text-2xl font-medium text-[var(--archive-ink-black)]">No PDF files yet</h2>
+              <p className="mt-3 text-[var(--archive-ink-grey)] max-w-md">
+                Import a folder to build your archive. You can also drag and drop a PDF into this page.
+              </p>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="archive-btn-text archive-btn-primary mt-6"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
+                Import Folder
+              </button>
             </div>
-            <h2 className="text-lg font-medium text-slate-800 dark:text-white mb-2">
-              No PDF files yet
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
-              Import a folder to get started with your PDF library. You can also drag and drop PDF files here to open them.
-            </p>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium flex items-center gap-2"
-            >
-              <FolderPlus className="w-4 h-4" />
-              Import Folder
-            </button>
           </div>
-        ) : showFavorites && favoriteItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-              <Star className="w-12 h-12 text-slate-400" />
+        ) : sortedItems.length === 0 ? (
+          <div className="grid place-items-center py-24 text-center">
+            <div>
+              <div className="w-20 h-20 mx-auto mb-4 rounded-full border border-black/10 bg-white grid place-items-center">
+                <Search className="w-9 h-9 text-[var(--archive-ink-grey)]" />
+              </div>
+              <h2 className="text-2xl font-medium text-[var(--archive-ink-black)]">No results</h2>
+              <p className="mt-3 text-[var(--archive-ink-grey)]">
+                Try another keyword or turn off favorites filter.
+              </p>
             </div>
-            <h2 className="text-lg font-medium text-slate-800 dark:text-white mb-2">
-              No favorites yet
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
-              Star your favorite PDFs to access them quickly here.
-            </p>
-            <button
-              onClick={() => setShowFavorites(false)}
-              className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl transition-colors font-medium"
-            >
-              View All Files
-            </button>
-          </div>
-        ) : filteredItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-              <Search className="w-12 h-12 text-slate-400" />
-            </div>
-            <h2 className="text-lg font-medium text-slate-800 dark:text-white mb-2">
-              No results found
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm">
-              Try a different search term.
-            </p>
           </div>
         ) : (
-          <>
-            {/* Favorites Section */}
-            {favoriteItems.length > 0 && !showFavorites && (
-              <div className="mb-8">
-                <div className="flex items-center gap-2 mb-4">
-                  <Star className="w-5 h-5 text-amber-500 fill-current" />
-                  <h2 className="text-lg font-semibold text-slate-800 dark:text-white">
-                    Favorites
-                  </h2>
-                  <span className="text-sm text-slate-400">
-                    {favoriteItems.length}
-                  </span>
-                </div>
-                <div
-                  className={
-                    viewMode === 'grid'
-                      ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'
-                      : 'flex flex-col gap-2'
-                  }
-                >
-                  {favoriteItems.slice(0, 5).map((item) => (
-                    <FileCard
-                      key={item.id}
-                      name={item.name}
-                      lastOpened={formatDate(item.lastOpened)}
-                      onClick={() => onOpenRecentFile(item.path)}
-                      isFavorite={true}
-                      onToggleFavorite={() => onToggleFavorite(item.id)}
-                      onRemove={() => onRemoveItem(item.id)}
-                      onRename={async (newName) => onRenameItem(item.id, newName)}
-                      metadata={item.metadata}
-                      thumbnail={item.metadata?.thumbnail}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Recent Files Section */}
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Clock className="w-5 h-5 text-slate-400" />
-                <h2 className="text-lg font-semibold text-slate-800 dark:text-white">
-                  {showFavorites ? 'Favorites' : 'Recent Files'}
-                </h2>
-                <span className="text-sm text-slate-400">
-                  {showFavorites ? favoriteItems.length : recentItems.length}
-                </span>
-              </div>
-
-              {(showFavorites ? favoriteItems : recentItems).length === 0 ? (
-                <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-                  {showFavorites ? 'No favorite files' : 'No recent files'}
-                </div>
-              ) : (
-                <div
-                  className={
-                    viewMode === 'grid'
-                      ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'
-                      : 'flex flex-col gap-2'
-                  }
-                >
-                  {(showFavorites ? favoriteItems : recentItems).map((item) => (
-                    <FileCard
-                      key={item.id}
-                      name={item.name}
-                      lastOpened={formatDate(item.lastOpened)}
-                      onClick={() => onOpenRecentFile(item.path)}
-                      isFavorite={item.favorite}
-                      onToggleFavorite={() => onToggleFavorite(item.id)}
-                      onRemove={() => onRemoveItem(item.id)}
-                      onRename={async (newName) => onRenameItem(item.id, newName)}
-                      metadata={item.metadata}
-                      thumbnail={item.metadata?.thumbnail}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
+          <div className={viewMode === 'grid' ? 'archive-grid' : 'flex flex-col gap-2 pb-24'}>
+            {sortedItems.map((item) => (
+              <FileCard
+                key={item.id}
+                name={item.name}
+                lastOpened={formatDate(item.lastOpened)}
+                onClick={() => onOpenRecentFile(item.path)}
+                isFavorite={Boolean(item.favorite)}
+                onToggleFavorite={() => onToggleFavorite(item.id)}
+                onRemove={() => onRemoveItem(item.id)}
+                onRename={async (newName) => onRenameItem(item.id, newName)}
+                metadata={item.metadata}
+                thumbnail={item.metadata?.thumbnail}
+                viewMode={viewMode}
+              />
+            ))}
+          </div>
         )}
       </main>
 
-      {/* Import Modal */}
       <ImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
@@ -374,12 +253,8 @@ export function LibraryView({
         isImporting={isImporting}
       />
 
-      {/* Import Progress */}
-      {importProgress && (
-        <ImportProgress progress={importProgress} />
-      )}
+      {importProgress && <ImportProgress progress={importProgress} />}
 
-      {/* Import Result */}
       {importResult && (
         <ImportResult
           result={importResult}
