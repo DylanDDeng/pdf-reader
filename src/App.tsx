@@ -82,7 +82,7 @@ function App() {
   );
 
   return (
-    <div className="flex h-screen bg-[#f6f7f8] dark:bg-background-dark">
+    <div className="flex h-screen overflow-hidden bg-[#f6f7f8] dark:bg-background-dark">
       <Sidebar
         onImportFolder={handleImportFolder}
         activeView={activeView}
@@ -91,28 +91,30 @@ function App() {
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
 
-      {activeView === 'library' ? (
-        <LibraryView
-          onOpenRecentFile={handleOpenRecentFile}
-          onOpenFile={handleOpenFile}
-          items={libraryItems}
-          onImportFiles={handleImportFiles}
-          onToggleFavorite={toggleFavorite}
-          onRemoveItem={removeItem}
-          onRenameItem={renameItem}
-          importProgress={importProgress}
-          lastSyncResult={lastSyncResult}
-          triggerImport={importTrigger}
-        />
-      ) : (
-        <Viewer
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onTabChange={switchTab}
-          onTabClose={handleTabClose}
-          onTabUpdate={updateTab}
-        />
-      )}
+      <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
+        {activeView === 'library' ? (
+          <LibraryView
+            onOpenRecentFile={handleOpenRecentFile}
+            onOpenFile={handleOpenFile}
+            items={libraryItems}
+            onImportFiles={handleImportFiles}
+            onToggleFavorite={toggleFavorite}
+            onRemoveItem={removeItem}
+            onRenameItem={renameItem}
+            importProgress={importProgress}
+            lastSyncResult={lastSyncResult}
+            triggerImport={importTrigger}
+          />
+        ) : (
+          <Viewer
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onTabChange={switchTab}
+            onTabClose={handleTabClose}
+            onTabUpdate={updateTab}
+          />
+        )}
+      </div>
     </div>
   );
 }

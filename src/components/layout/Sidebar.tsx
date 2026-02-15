@@ -20,7 +20,7 @@ export function Sidebar({
 
   return (
     <aside 
-      className={`bg-white dark:bg-background-dark border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300 ${
+      className={`bg-white dark:bg-background-dark border-r border-slate-200 dark:border-slate-700 shrink-0 overflow-hidden flex flex-col transition-all duration-300 ${
         isCollapsed ? 'w-16' : 'w-56'
       }`}
     >

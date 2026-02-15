@@ -198,7 +198,7 @@ export function Viewer({
 
   if (tabs.length === 0) {
     return (
-      <div className="flex-1 flex flex-col h-screen min-h-0 bg-[#f6f7f8]">
+      <div className="flex-1 flex flex-col h-full min-h-0 min-w-0 bg-[#f6f7f8]">
         <div className="h-14 border-b border-slate-200 bg-white flex items-center px-4">
           <span className="font-medium text-slate-700">PDF Reader</span>
         </div>
@@ -216,7 +216,7 @@ export function Viewer({
   }
 
   return (
-    <div className="flex-1 flex flex-col h-screen min-h-0 bg-[#f6f7f8]">
+    <div className="flex-1 flex flex-col h-full min-h-0 min-w-0 bg-[#f6f7f8]">
       <div className="bg-white border-b border-slate-200 flex items-center overflow-x-auto">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;

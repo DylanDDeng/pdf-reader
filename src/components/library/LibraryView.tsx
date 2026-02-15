@@ -134,7 +134,7 @@ export function LibraryView({
 
   return (
     <div 
-      className="flex-1 flex flex-col bg-[#f6f7f8] dark:bg-background-dark relative"
+      className="flex-1 h-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-[#f6f7f8] dark:bg-background-dark relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
