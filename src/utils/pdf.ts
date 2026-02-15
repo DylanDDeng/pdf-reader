@@ -93,6 +93,7 @@ export async function renderPage(
 export interface PdfTextLayerTask {
   cancel: () => void;
   destroy: () => void;
+  element: HTMLDivElement;
 }
 
 export async function renderTextLayer(
@@ -132,6 +133,7 @@ export async function renderTextLayer(
     throw err;
   }
 
+  const textLayerElement = textLayerBuilder.div as HTMLDivElement;
   return {
     cancel: () => {
       textLayerBuilder.cancel();
@@ -140,6 +142,7 @@ export async function renderTextLayer(
       textLayerBuilder.cancel();
       container.innerHTML = '';
     },
+    element: textLayerElement,
   };
 }
 

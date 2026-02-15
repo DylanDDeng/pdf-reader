@@ -54,7 +54,10 @@ export function PdfViewer({
   // 用于防止选择事件重复触发
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textLayerTaskRef = useRef<PdfTextLayerTask | null>(null);
+  const renderedTextLayerRef = useRef<HTMLDivElement | null>(null);
   const renderSeqRef = useRef(0);
+  const isPointerSelectingRef = useRef(false);
+  const lastSelectionKeyRef = useRef('');
 
   const renderCurrentPage = useCallback(async () => {
     if (!documentRef.current || !canvasRef.current || !textLayerRef.current) {
@@ -82,6 +85,7 @@ export function PdfViewer({
         scale,
         textLayerTaskRef.current
       );
+      renderedTextLayerRef.current = textLayerTaskRef.current.element;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!message.includes('TextLayer task cancelled')) {
@@ -100,6 +104,7 @@ export function PdfViewer({
       setError(null);
       textLayerTaskRef.current?.destroy();
       textLayerTaskRef.current = null;
+      renderedTextLayerRef.current = null;
       // 清除之前的选择状态
       setToolbarPosition(null);
       setSelectedText('');
@@ -139,6 +144,7 @@ export function PdfViewer({
                 scale,
                 textLayerTaskRef.current
               );
+              renderedTextLayerRef.current = textLayerTaskRef.current.element;
             }
           }
         }
@@ -167,6 +173,7 @@ export function PdfViewer({
       renderSeqRef.current += 1;
       textLayerTaskRef.current?.destroy();
       textLayerTaskRef.current = null;
+      renderedTextLayerRef.current = null;
       if (documentRef.current) {
         documentRef.current.destroy();
         documentRef.current = null;
@@ -181,27 +188,23 @@ export function PdfViewer({
 
   // 检查选择是否在文本层内
   const isSelectionInTextLayer = useCallback((selection: Selection): boolean => {
-    const textLayer = textLayerRef.current;
+    const textLayer = renderedTextLayerRef.current;
     if (!textLayer || selection.rangeCount === 0) return false;
 
     const range = selection.getRangeAt(0);
-    
-    // 检查选区的起始和结束是否在文本层内
-    const checkNode = (node: Node): boolean => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        return textLayer.contains(node);
-      }
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        return textLayer.contains(node);
-      }
-      return false;
+
+    const getOwnerLayer = (node: Node): HTMLDivElement | null => {
+      const element = node.nodeType === Node.ELEMENT_NODE
+        ? (node as HTMLElement)
+        : node.parentElement;
+      if (!element) return null;
+      return element.closest('.textLayer') as HTMLDivElement | null;
     };
 
-    // 检查 anchorNode 和 focusNode
-    const anchorInLayer = checkNode(range.startContainer);
-    const focusInLayer = checkNode(range.endContainer);
+    const startLayer = getOwnerLayer(range.startContainer);
+    const endLayer = getOwnerLayer(range.endContainer);
 
-    return anchorInLayer && focusInLayer;
+    return startLayer === textLayer && endLayer === textLayer;
   }, []);
 
   // 获取选中文本的信息
@@ -210,7 +213,7 @@ export function PdfViewer({
       return null;
     }
 
-    const textLayer = textLayerRef.current;
+    const textLayer = renderedTextLayerRef.current;
     if (!textLayer) return null;
 
     const containerRect = textLayer.getBoundingClientRect();
@@ -220,19 +223,38 @@ export function PdfViewer({
     if (rectList.length === 0) return null;
 
     const rects: Array<{ left: number; top: number; width: number; height: number }> = [];
+    const acceptedRects: DOMRect[] = [];
+    const pageArea = containerRect.width * containerRect.height;
     
     for (let i = 0; i < rectList.length; i++) {
       const rect = rectList[i];
+      if (rect.width <= 0 || rect.height <= 0) {
+        continue;
+      }
+
+      // Filter out accidental full-page rects that can appear during unstable range updates.
+      if (rect.width >= containerRect.width * 0.98 && rect.height >= containerRect.height * 0.98) {
+        continue;
+      }
+
+      const area = rect.width * rect.height;
+      if (area > pageArea * 0.9) {
+        continue;
+      }
+
       rects.push({
         left: rect.left - containerRect.left,
         top: rect.top - containerRect.top,
         width: rect.width,
         height: rect.height,
       });
+      acceptedRects.push(rect);
     }
 
+    if (rects.length === 0) return null;
+
     // 获取鼠标位置（使用选区的最后一个矩形中心）
-    const lastRect = rectList[rectList.length - 1];
+    const lastRect = acceptedRects[acceptedRects.length - 1];
     const mousePosition = {
       x: lastRect.left + lastRect.width / 2,
       y: lastRect.top,
@@ -250,52 +272,107 @@ export function PdfViewer({
       window.getSelection()?.removeAllRanges();
     }
 
+    lastSelectionKeyRef.current = '';
     setToolbarPosition(null);
     setSelectedText('');
     setSelectedRects([]);
   }, []);
 
-  const handleSelectionChange = useCallback(() => {
+  const updateSelectionFromWindow = useCallback((clearOnInvalid: boolean = true) => {
     const selection = window.getSelection();
 
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      resetSelectionState();
+      if (clearOnInvalid) {
+        resetSelectionState();
+      }
       return;
     }
 
     if (!isSelectionInTextLayer(selection)) {
-      resetSelectionState();
+      if (clearOnInvalid) {
+        resetSelectionState();
+      }
       return;
     }
 
-    if (selectionTimeoutRef.current) {
-      clearTimeout(selectionTimeoutRef.current);
-    }
-
-    selectionTimeoutRef.current = setTimeout(() => {
-      const info = getSelectionInfo(selection);
-      
-      if (info && info.text.length > 0) {
-        setSelectedText(info.text);
-        setSelectedRects(info.rects);
-        setToolbarPosition(info.mousePosition);
-      } else {
+    const info = getSelectionInfo(selection);
+    if (!info || info.text.length === 0) {
+      if (clearOnInvalid) {
         resetSelectionState();
       }
-    }, 10);
-  }, [isSelectionInTextLayer, getSelectionInfo, resetSelectionState]);
+      return;
+    }
 
-  // 监听选择变化
+    const signature = `${info.text}:${info.rects.length}:${Math.round(info.rects[0]?.left ?? 0)}:${Math.round(info.rects[0]?.top ?? 0)}`;
+    if (signature === lastSelectionKeyRef.current) {
+      return;
+    }
+
+    lastSelectionKeyRef.current = signature;
+    setSelectedText(info.text);
+    setSelectedRects(info.rects);
+    setToolbarPosition(info.mousePosition);
+  }, [getSelectionInfo, isSelectionInTextLayer, resetSelectionState]);
+
+  // Selection is finalized on pointer-up to avoid toolbar flicker while dragging.
   useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const textLayer = renderedTextLayerRef.current;
+      if (!textLayer) return;
+      if (!(event.target instanceof Node)) return;
+      if (!textLayer.contains(event.target)) return;
+
+      isPointerSelectingRef.current = true;
+      setToolbarPosition(null);
+    };
+
+    const handlePointerUp = () => {
+      if (!isPointerSelectingRef.current) {
+        return;
+      }
+
+      isPointerSelectingRef.current = false;
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      selectionTimeoutRef.current = setTimeout(() => {
+        updateSelectionFromWindow(true);
+      }, 20);
+    };
+
+    const handleSelectionChange = () => {
+      if (isPointerSelectingRef.current) {
+        return;
+      }
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      selectionTimeoutRef.current = setTimeout(() => {
+        updateSelectionFromWindow(false);
+      }, 20);
+    };
+
+    const handleKeySelection = (event: KeyboardEvent) => {
+      if (event.key === 'Shift' || event.key.startsWith('Arrow')) {
+        handleSelectionChange();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('pointerup', handlePointerUp, true);
     document.addEventListener('selectionchange', handleSelectionChange);
+    document.addEventListener('keyup', handleKeySelection, true);
 
     return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointerup', handlePointerUp, true);
       document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('keyup', handleKeySelection, true);
       if (selectionTimeoutRef.current) {
         clearTimeout(selectionTimeoutRef.current);
       }
     };
-  }, [handleSelectionChange]);
+  }, [updateSelectionFromWindow]);
 
   // 处理高亮操作
   const handleToolbarAction = (action: AnnotationAction) => {
@@ -318,6 +395,7 @@ export function PdfViewer({
   };
 
   useEffect(() => {
+    isPointerSelectingRef.current = false;
     resetSelectionState(true);
   }, [currentPage, scale, file, resetSelectionState]);
 

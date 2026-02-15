@@ -277,7 +277,7 @@ export function Viewer({
                 onDocumentLoad={handleDocumentLoad}
                 onAddHighlight={handleAddHighlight}
                 onHighlightClick={handleHighlightClick}
-                interactiveHighlights={showAnnotations}
+                interactiveHighlights={false}
               />
 
               <FloatingToolbar
