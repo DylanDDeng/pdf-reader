@@ -60,10 +60,15 @@ export function Viewer({
     setTotalPages(pages);
     setOutline(pdfOutline);
 
-    if (activeTab && activeTab.currentPage > pages) {
-      onTabUpdate(activeTab.id, { currentPage: pages });
+    if (!activeTabId) {
+      return;
     }
-  }, [activeTab, onTabUpdate]);
+
+    const current = tabs.find((tab) => tab.id === activeTabId)?.currentPage ?? 1;
+    if (current > pages) {
+      onTabUpdate(activeTabId, { currentPage: pages });
+    }
+  }, [activeTabId, onTabUpdate, tabs]);
 
   const handlePageChange = useCallback((page: number) => {
     if (!activeTab) {
@@ -193,7 +198,7 @@ export function Viewer({
 
   if (tabs.length === 0) {
     return (
-      <div className="flex-1 flex flex-col h-screen bg-[#f6f7f8]">
+      <div className="flex-1 flex flex-col h-screen min-h-0 bg-[#f6f7f8]">
         <div className="h-14 border-b border-slate-200 bg-white flex items-center px-4">
           <span className="font-medium text-slate-700">PDF Reader</span>
         </div>
@@ -211,7 +216,7 @@ export function Viewer({
   }
 
   return (
-    <div className="flex-1 flex flex-col h-screen bg-[#f6f7f8]">
+    <div className="flex-1 flex flex-col h-screen min-h-0 bg-[#f6f7f8]">
       <div className="bg-white border-b border-slate-200 flex items-center overflow-x-auto">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
@@ -267,7 +272,7 @@ export function Viewer({
             onClose={() => onTabClose(activeTab.id)}
           />
 
-          <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex overflow-hidden min-h-0">
             {isSidebarOpen && (
               <ReaderSidebar
                 outline={outline}
@@ -277,13 +282,14 @@ export function Viewer({
               />
             )}
 
-            <div className="flex-1 relative">
+            <div className="flex-1 relative min-h-0 min-w-0">
               <PdfViewer
                 file={activeTab.file}
                 currentPage={activeTab.currentPage}
                 scale={activeTab.scale}
                 annotations={annotations}
                 onDocumentLoad={handleDocumentLoad}
+                onPageChange={handlePageChange}
                 onAddHighlight={handleAddHighlight}
                 onHighlightClick={handleHighlightClick}
                 interactiveHighlights={false}
@@ -291,11 +297,6 @@ export function Viewer({
               />
 
               <FloatingToolbar
-                currentPage={activeTab.currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
-                onPrevPage={handlePrevPage}
-                onNextPage={handleNextPage}
                 showAnnotations={showAnnotations}
                 onToggleAnnotations={() => setShowAnnotations((prev) => !prev)}
                 showContents={isSidebarOpen}

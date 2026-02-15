@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import {
   loadPdfDocument,
   renderPage,
@@ -17,6 +18,7 @@ interface PdfViewerProps {
   scale: number;
   annotations: Annotation[];
   onDocumentLoad: (totalPages: number, outline: OutlineItem[]) => void;
+  onPageChange?: (page: number) => void;
   onAddHighlight: (
     page: number,
     selectedText: string,
@@ -28,75 +30,124 @@ interface PdfViewerProps {
   deleteMode?: boolean;
 }
 
+interface PageRefs {
+  card: HTMLDivElement | null;
+  canvas: HTMLCanvasElement | null;
+  textLayerContainer: HTMLDivElement | null;
+}
+
+interface PageSize {
+  width: number;
+  height: number;
+}
+
+interface SelectionLayer {
+  pageNumber: number;
+  layer: HTMLDivElement;
+}
+
+interface SelectionInfo {
+  text: string;
+  rects: Array<{ left: number; top: number; width: number; height: number }>;
+  mousePosition: { x: number; y: number };
+}
+
+const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 };
+const SCROLL_SYNC_DELAY_MS = 420;
+
 export function PdfViewer({
   file,
   currentPage,
   scale,
   annotations,
   onDocumentLoad,
+  onPageChange,
   onAddHighlight,
   onHighlightClick,
   interactiveHighlights = false,
   deleteMode = false,
 }: PdfViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const textLayerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const documentRef = useRef<any>(null);
+  const onDocumentLoadRef = useRef(onDocumentLoad);
+  const documentRef = useRef<PDFDocumentProxy | null>(null);
+  const pageRefsRef = useRef<Map<number, PageRefs>>(new Map());
+  const textLayerTasksRef = useRef<Map<number, PdfTextLayerTask>>(new Map());
+  const renderSeqRef = useRef(0);
+  const scrollRafRef = useRef<number | null>(null);
+  const currentPageRef = useRef(currentPage);
+  const isPointerSelectingRef = useRef(false);
+  const isProgrammaticScrollRef = useRef(false);
+  const pageChangeFromScrollRef = useRef<number | null>(null);
+  const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSelectionKeyRef = useRef('');
+
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [pageSize, setPageSize] = useState({ width: 612, height: 792 });
-  
-  // 选中文本相关状态
-  const [selectedText, setSelectedText] = useState<string>('');
+  const [pageCount, setPageCount] = useState(0);
+  const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({});
+  const [renderedPages, setRenderedPages] = useState<Record<number, boolean>>({});
+
+  const [selectedPage, setSelectedPage] = useState<number | null>(null);
+  const [selectedText, setSelectedText] = useState('');
   const [selectedRects, setSelectedRects] = useState<Array<{ left: number; top: number; width: number; height: number }>>([]);
   const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedColor, setSelectedColor] = useState<HighlightColor>('yellow');
-  
-  // 用于防止选择事件重复触发
-  const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textLayerTaskRef = useRef<PdfTextLayerTask | null>(null);
-  const renderedTextLayerRef = useRef<HTMLDivElement | null>(null);
-  const renderSeqRef = useRef(0);
-  const isPointerSelectingRef = useRef(false);
-  const lastSelectionKeyRef = useRef('');
 
-  const renderCurrentPage = useCallback(async () => {
-    if (!documentRef.current || !canvasRef.current || !textLayerRef.current) {
-      return;
+  const destroyTextLayerTasks = useCallback(() => {
+    textLayerTasksRef.current.forEach((task) => {
+      task.destroy();
+    });
+    textLayerTasksRef.current.clear();
+  }, []);
+
+  const resetSelectionState = useCallback((clearBrowserSelection: boolean = false) => {
+    if (clearBrowserSelection) {
+      window.getSelection()?.removeAllRanges();
     }
 
-    const renderSeq = ++renderSeqRef.current;
+    lastSelectionKeyRef.current = '';
+    setSelectedPage(null);
+    setToolbarPosition(null);
+    setSelectedText('');
+    setSelectedRects([]);
+  }, []);
 
-    try {
-      const page = await documentRef.current.getPage(currentPage);
-      
-      const viewport = page.getViewport({ scale });
-      setPageSize({ width: viewport.width, height: viewport.height });
-      
-      // Render canvas
-      await renderPage(page, canvasRef.current, scale);
-      if (renderSeq !== renderSeqRef.current) {
-        return;
+  const setPageRefs = useCallback((pageNumber: number, partial: Partial<PageRefs>) => {
+    const prev = pageRefsRef.current.get(pageNumber) ?? {
+      card: null,
+      canvas: null,
+      textLayerContainer: null,
+    };
+    pageRefsRef.current.set(pageNumber, { ...prev, ...partial });
+  }, []);
+
+  const waitForPageRefs = useCallback(async (
+    pageNumber: number,
+    expectedRenderSeq: number
+  ): Promise<PageRefs | null> => {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      if (expectedRenderSeq !== renderSeqRef.current) {
+        return null;
       }
-      
-      // Render text layer
-      textLayerTaskRef.current = await renderTextLayer(
-        page,
-        textLayerRef.current,
-        scale,
-        textLayerTaskRef.current
-      );
-      renderedTextLayerRef.current = textLayerTaskRef.current.element;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('TextLayer task cancelled')) {
-        console.error('Error rendering page:', err);
+      const refs = pageRefsRef.current.get(pageNumber);
+      if (refs?.canvas && refs.textLayerContainer) {
+        return refs;
       }
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 16);
+      });
     }
-  }, [currentPage, scale]);
+    return null;
+  }, []);
 
-  // Load document
+  useEffect(() => {
+    onDocumentLoadRef.current = onDocumentLoad;
+  }, [onDocumentLoad]);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
   useEffect(() => {
     let isMounted = true;
     const loadSeq = ++renderSeqRef.current;
@@ -104,17 +155,15 @@ export function PdfViewer({
     const loadDocument = async () => {
       setIsLoading(true);
       setError(null);
-      textLayerTaskRef.current?.destroy();
-      textLayerTaskRef.current = null;
-      renderedTextLayerRef.current = null;
-      // 清除之前的选择状态
-      setToolbarPosition(null);
-      setSelectedText('');
-      setSelectedRects([]);
-      
+      setPageCount(0);
+      setPageSizes({});
+      setRenderedPages({});
+      pageRefsRef.current.clear();
+      destroyTextLayerTasks();
+      resetSelectionState(true);
+
       try {
         let source: ArrayBuffer;
-
         if (typeof file === 'string') {
           const { readFile } = await import('@tauri-apps/plugin-fs');
           const contents = await readFile(file);
@@ -124,42 +173,26 @@ export function PdfViewer({
         }
 
         const doc = await loadPdfDocument(source);
-
-        if (isMounted) {
-          documentRef.current = doc;
-          
-          // Extract outline from PDF
-          const outline = await extractOutline(doc);
-          onDocumentLoad(doc.numPages, outline);
-
-          if (canvasRef.current && textLayerRef.current) {
-            const initialPage = Math.max(1, Math.min(currentPage, doc.numPages));
-            const page = await doc.getPage(initialPage);
-            const viewport = page.getViewport({ scale });
-            setPageSize({ width: viewport.width, height: viewport.height });
-            
-            await renderPage(page, canvasRef.current, scale);
-            if (loadSeq === renderSeqRef.current) {
-              textLayerTaskRef.current = await renderTextLayer(
-                page,
-                textLayerRef.current,
-                scale,
-                textLayerTaskRef.current
-              );
-              renderedTextLayerRef.current = textLayerTaskRef.current.element;
-            }
-          }
+        if (!isMounted || loadSeq !== renderSeqRef.current) {
+          doc.destroy();
+          return;
         }
+
+        documentRef.current = doc;
+        const outline = await extractOutline(doc);
+        if (!isMounted || loadSeq !== renderSeqRef.current) {
+          return;
+        }
+
+        onDocumentLoadRef.current(doc.numPages, outline);
+        setPageCount(doc.numPages);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const isCancelled = message.includes('TextLayer task cancelled');
-        if (!isCancelled) {
+        if (!message.includes('TextLayer task cancelled')) {
           console.error('Error loading PDF:', err);
         }
         if (isMounted) {
-          if (!isCancelled) {
-            setError(`Failed to load PDF: ${message}`);
-          }
+          setError(`Failed to load PDF: ${message}`);
         }
       } finally {
         if (isMounted) {
@@ -168,82 +201,285 @@ export function PdfViewer({
       }
     };
 
-    loadDocument();
+    void loadDocument();
 
     return () => {
       isMounted = false;
       renderSeqRef.current += 1;
-      textLayerTaskRef.current?.destroy();
-      textLayerTaskRef.current = null;
-      renderedTextLayerRef.current = null;
+      destroyTextLayerTasks();
       if (documentRef.current) {
         documentRef.current.destroy();
         documentRef.current = null;
       }
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
     };
-  }, [file, onDocumentLoad]);
+  }, [destroyTextLayerTasks, file, resetSelectionState]);
 
-  // Render page when current page or scale changes
   useEffect(() => {
-    renderCurrentPage();
-  }, [renderCurrentPage]);
+    const doc = documentRef.current;
+    if (!doc || pageCount === 0) {
+      return;
+    }
 
-  // 检查选择是否在文本层内
-  const isSelectionInTextLayer = useCallback((selection: Selection): boolean => {
-    const textLayer = renderedTextLayerRef.current;
-    if (!textLayer || selection.rangeCount === 0) return false;
+    let cancelled = false;
+    const renderSeq = ++renderSeqRef.current;
+    destroyTextLayerTasks();
+    setRenderedPages({});
 
-    const range = selection.getRangeAt(0);
+    const renderAllPages = async () => {
+      for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+        if (cancelled || renderSeq !== renderSeqRef.current) {
+          return;
+        }
 
-    const getOwnerLayer = (node: Node): HTMLDivElement | null => {
-      const element = node.nodeType === Node.ELEMENT_NODE
-        ? (node as HTMLElement)
-        : node.parentElement;
-      if (!element) return null;
-      return element.closest('.textLayer') as HTMLDivElement | null;
+        try {
+          const page = await doc.getPage(pageNumber);
+          if (cancelled || renderSeq !== renderSeqRef.current) {
+            return;
+          }
+
+          const viewport = page.getViewport({ scale });
+          setPageSizes((prev) => {
+            const currentSize = prev[pageNumber];
+            if (
+              currentSize &&
+              Math.abs(currentSize.width - viewport.width) < 0.1 &&
+              Math.abs(currentSize.height - viewport.height) < 0.1
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              [pageNumber]: { width: viewport.width, height: viewport.height },
+            };
+          });
+
+          const refs = await waitForPageRefs(pageNumber, renderSeq);
+          if (!refs?.canvas || !refs.textLayerContainer) {
+            continue;
+          }
+
+          await renderPage(page, refs.canvas, scale);
+          if (cancelled || renderSeq !== renderSeqRef.current) {
+            return;
+          }
+
+          const previousTask = textLayerTasksRef.current.get(pageNumber) ?? null;
+          const nextTask = await renderTextLayer(page, refs.textLayerContainer, scale, previousTask);
+          nextTask.element.dataset.pageNumber = String(pageNumber);
+          textLayerTasksRef.current.set(pageNumber, nextTask);
+          setRenderedPages((prev) => (prev[pageNumber] ? prev : { ...prev, [pageNumber]: true }));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!message.includes('TextLayer task cancelled')) {
+            console.error(`Error rendering page ${pageNumber}:`, err);
+          }
+        }
+      }
     };
 
-    const startLayer = getOwnerLayer(range.startContainer);
-    const endLayer = getOwnerLayer(range.endContainer);
+    void renderAllPages();
 
-    return startLayer === textLayer && endLayer === textLayer;
+    return () => {
+      cancelled = true;
+    };
+  }, [destroyTextLayerTasks, pageCount, scale, waitForPageRefs]);
+
+  const findPageFromScroll = useCallback(() => {
+    if (!onPageChange || isProgrammaticScrollRef.current) {
+      return;
+    }
+    const container = containerRef.current;
+    if (!container || pageCount === 0) {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const probeX = containerRect.left + containerRect.width / 2;
+    const probeY = containerRect.top + Math.min(containerRect.height * 0.35, 260);
+    const probeNode = document.elementFromPoint(probeX, probeY) as HTMLElement | null;
+    const pageNode = probeNode?.closest<HTMLElement>('[data-page-number]');
+    const parsedPage = pageNode?.dataset.pageNumber
+      ? Number.parseInt(pageNode.dataset.pageNumber, 10)
+      : NaN;
+    const nextPage = Number.isFinite(parsedPage) ? parsedPage : currentPageRef.current;
+    if (nextPage !== currentPageRef.current) {
+      currentPageRef.current = nextPage;
+      pageChangeFromScrollRef.current = nextPage;
+      onPageChange(nextPage);
+    }
+  }, [onPageChange, pageCount]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleScroll = () => {
+      if (isProgrammaticScrollRef.current) {
+        return;
+      }
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        findPageFromScroll();
+      });
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, [findPageFromScroll, onPageChange]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) {
+        return;
+      }
+      const canScroll = container.scrollHeight > container.clientHeight + 1;
+      if (!canScroll) {
+        return;
+      }
+
+      const deltaY = event.deltaY;
+      if (Math.abs(deltaY) < 0.1) {
+        return;
+      }
+
+      const atTop = container.scrollTop <= 0;
+      const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+      const scrollingUp = deltaY < 0;
+      const scrollingDown = deltaY > 0;
+      if ((scrollingUp && atTop) || (scrollingDown && atBottom)) {
+        return;
+      }
+
+      container.scrollTop += deltaY;
+      event.preventDefault();
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
   }, []);
 
-  // 获取选中文本的信息
-  const getSelectionInfo = useCallback((selection: Selection): { text: string; rects: Array<{ left: number; top: number; width: number; height: number }>; mousePosition: { x: number; y: number } } | null => {
-    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+  useEffect(() => {
+    if (pageCount === 0) {
+      return;
+    }
+    if (pageChangeFromScrollRef.current === currentPage) {
+      pageChangeFromScrollRef.current = null;
+      return;
+    }
+    const card = pageRefsRef.current.get(currentPage)?.card;
+    const container = containerRef.current;
+    if (!card || !container) {
+      return;
+    }
+
+    const cardRect = card.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const isAlreadyNearTop =
+      cardRect.top >= containerRect.top + 8 &&
+      cardRect.top <= containerRect.top + Math.max(60, containerRect.height * 0.18);
+
+    if (isAlreadyNearTop) {
+      return;
+    }
+
+    isProgrammaticScrollRef.current = true;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const timer = window.setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, SCROLL_SYNC_DELAY_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [currentPage, pageCount]);
+
+  const getSelectionLayer = useCallback((selection: Selection): SelectionLayer | null => {
+    if (selection.rangeCount === 0) {
       return null;
     }
 
-    const textLayer = renderedTextLayerRef.current;
-    if (!textLayer) return null;
+    const range = selection.getRangeAt(0);
+    const resolveLayer = (node: Node): SelectionLayer | null => {
+      const element = node.nodeType === Node.ELEMENT_NODE
+        ? (node as HTMLElement)
+        : node.parentElement;
+      const layer = element?.closest('.textLayer') as HTMLDivElement | null;
+      if (!layer) {
+        return null;
+      }
+      const pageAttr = layer.dataset.pageNumber;
+      const pageNumber = pageAttr ? Number.parseInt(pageAttr, 10) : NaN;
+      if (!Number.isFinite(pageNumber)) {
+        return null;
+      }
+      return { pageNumber, layer };
+    };
 
-    const containerRect = textLayer.getBoundingClientRect();
+    const start = resolveLayer(range.startContainer);
+    const end = resolveLayer(range.endContainer);
+    if (!start || !end) {
+      return null;
+    }
+    if (start.pageNumber !== end.pageNumber || start.layer !== end.layer) {
+      return null;
+    }
+    return start;
+  }, []);
+
+  const getSelectionInfo = useCallback((selection: Selection, layer: HTMLDivElement): SelectionInfo | null => {
+    if (selection.isCollapsed || !selection.toString().trim() || selection.rangeCount === 0) {
+      return null;
+    }
+
+    const containerRect = layer.getBoundingClientRect();
     const range = selection.getRangeAt(0);
     const rectList = range.getClientRects();
-    
-    if (rectList.length === 0) return null;
+    if (rectList.length === 0) {
+      return null;
+    }
 
     const rects: Array<{ left: number; top: number; width: number; height: number }> = [];
     const acceptedRects: DOMRect[] = [];
     const pageArea = containerRect.width * containerRect.height;
-    
-    for (let i = 0; i < rectList.length; i++) {
+
+    for (let i = 0; i < rectList.length; i += 1) {
       const rect = rectList[i];
       if (rect.width <= 0 || rect.height <= 0) {
         continue;
       }
-
-      // Filter out accidental full-page rects that can appear during unstable range updates.
       if (rect.width >= containerRect.width * 0.98 && rect.height >= containerRect.height * 0.98) {
         continue;
       }
-
-      const area = rect.width * rect.height;
-      if (area > pageArea * 0.9) {
+      if (rect.width * rect.height > pageArea * 0.9) {
         continue;
       }
-
       rects.push({
         left: rect.left - containerRect.left,
         top: rect.top - containerRect.top,
@@ -253,31 +489,19 @@ export function PdfViewer({
       acceptedRects.push(rect);
     }
 
-    if (rects.length === 0) return null;
+    if (rects.length === 0) {
+      return null;
+    }
 
-    // 获取鼠标位置（使用选区的最后一个矩形中心）
     const lastRect = acceptedRects[acceptedRects.length - 1];
-    const mousePosition = {
-      x: lastRect.left + lastRect.width / 2,
-      y: lastRect.top,
-    };
-
     return {
       text: selection.toString().trim(),
       rects,
-      mousePosition,
+      mousePosition: {
+        x: lastRect.left + lastRect.width / 2,
+        y: lastRect.top,
+      },
     };
-  }, []);
-
-  const resetSelectionState = useCallback((clearBrowserSelection: boolean = false) => {
-    if (clearBrowserSelection) {
-      window.getSelection()?.removeAllRanges();
-    }
-
-    lastSelectionKeyRef.current = '';
-    setToolbarPosition(null);
-    setSelectedText('');
-    setSelectedRects([]);
   }, []);
 
   const updateSelectionFromWindow = useCallback((clearOnInvalid: boolean = true) => {
@@ -289,7 +513,6 @@ export function PdfViewer({
     }
 
     const selection = window.getSelection();
-
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
       if (clearOnInvalid) {
         resetSelectionState();
@@ -297,14 +520,15 @@ export function PdfViewer({
       return;
     }
 
-    if (!isSelectionInTextLayer(selection)) {
+    const selectionLayer = getSelectionLayer(selection);
+    if (!selectionLayer) {
       if (clearOnInvalid) {
         resetSelectionState();
       }
       return;
     }
 
-    const info = getSelectionInfo(selection);
+    const info = getSelectionInfo(selection, selectionLayer.layer);
     if (!info || info.text.length === 0) {
       if (clearOnInvalid) {
         resetSelectionState();
@@ -312,24 +536,34 @@ export function PdfViewer({
       return;
     }
 
-    const signature = `${info.text}:${info.rects.length}:${Math.round(info.rects[0]?.left ?? 0)}:${Math.round(info.rects[0]?.top ?? 0)}`;
+    const firstRect = info.rects[0];
+    const signature = `${selectionLayer.pageNumber}:${info.text}:${info.rects.length}:${Math.round(firstRect.left)}:${Math.round(firstRect.top)}`;
     if (signature === lastSelectionKeyRef.current) {
       return;
     }
 
     lastSelectionKeyRef.current = signature;
+    setSelectedPage(selectionLayer.pageNumber);
     setSelectedText(info.text);
     setSelectedRects(info.rects);
     setToolbarPosition(info.mousePosition);
-  }, [deleteMode, getSelectionInfo, isSelectionInTextLayer, resetSelectionState]);
+  }, [deleteMode, getSelectionInfo, getSelectionLayer, resetSelectionState]);
 
-  // Selection is finalized on pointer-up to avoid toolbar flicker while dragging.
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      const textLayer = renderedTextLayerRef.current;
-      if (!textLayer) return;
-      if (!(event.target instanceof Node)) return;
-      if (!textLayer.contains(event.target)) return;
+      if (deleteMode) {
+        return;
+      }
+      if (!(event.target instanceof Node)) {
+        return;
+      }
+      const element = event.target.nodeType === Node.ELEMENT_NODE
+        ? (event.target as HTMLElement)
+        : event.target.parentElement;
+      const layer = element?.closest('.textLayer');
+      if (!layer) {
+        return;
+      }
 
       isPointerSelectingRef.current = true;
       setToolbarPosition(null);
@@ -339,7 +573,6 @@ export function PdfViewer({
       if (!isPointerSelectingRef.current) {
         return;
       }
-
       isPointerSelectingRef.current = false;
       if (selectionTimeoutRef.current) {
         clearTimeout(selectionTimeoutRef.current);
@@ -381,22 +614,22 @@ export function PdfViewer({
         clearTimeout(selectionTimeoutRef.current);
       }
     };
-  }, [updateSelectionFromWindow]);
+  }, [deleteMode, updateSelectionFromWindow]);
 
-  // 处理高亮操作
   const handleToolbarAction = (action: AnnotationAction) => {
-    if (action === 'highlight' && selectedText && selectedRects.length > 0) {
-      // 调整 rects 为相对于页面的比例（考虑当前 scale）
-      const scaledRects = selectedRects.map(rect => ({
-        left: rect.left / scale,
-        top: rect.top / scale,
-        width: rect.width / scale,
-        height: rect.height / scale,
-      }));
-      
-      onAddHighlight(currentPage, selectedText, selectedColor, scaledRects);
-      resetSelectionState(true);
+    if (action !== 'highlight' || !selectedText || selectedRects.length === 0 || !selectedPage) {
+      return;
     }
+
+    const scaledRects = selectedRects.map((rect) => ({
+      left: rect.left / scale,
+      top: rect.top / scale,
+      width: rect.width / scale,
+      height: rect.height / scale,
+    }));
+
+    onAddHighlight(selectedPage, selectedText, selectedColor, scaledRects);
+    resetSelectionState(true);
   };
 
   const handleCloseToolbar = () => {
@@ -406,7 +639,7 @@ export function PdfViewer({
   useEffect(() => {
     isPointerSelectingRef.current = false;
     resetSelectionState(true);
-  }, [currentPage, scale, file, resetSelectionState]);
+  }, [file, scale, resetSelectionState]);
 
   useEffect(() => {
     if (deleteMode) {
@@ -418,73 +651,97 @@ export function PdfViewer({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-auto bg-[#eef0f2] relative flex justify-center p-8"
+      className="h-full w-full overflow-y-auto overflow-x-auto bg-[#eef0f2] relative"
+      style={{ scrollbarGutter: 'stable both-edges' }}
     >
-      {/* PDF Page Container */}
-      <div className="relative">
-        {/* Page Card */}
-        <div 
-          className="bg-white rounded-lg shadow-xl overflow-hidden relative"
-          style={{ width: pageSize.width, height: pageSize.height }}
-        >
-          {isLoading && (
-            <div className="flex items-center justify-center w-full h-full">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
-                <span className="text-sm text-slate-400">Loading...</span>
-              </div>
+      <div className="min-h-full flex flex-col items-center gap-8 px-8 py-8">
+        {isLoading && (
+          <div className="flex items-center justify-center w-full py-20">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
+              <span className="text-sm text-slate-400">Loading...</span>
             </div>
-          )}
-          {error && (
-            <div className="flex items-center justify-center w-full h-full p-8">
-              <div className="text-red-500 text-center">
-                <p className="font-medium mb-1">Error</p>
-                <p className="text-sm text-red-400">{error}</p>
-              </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center justify-center w-full py-20">
+            <div className="text-red-500 text-center">
+              <p className="font-medium mb-1">Error</p>
+              <p className="text-sm text-red-400">{error}</p>
             </div>
-          )}
-          
-          {/* Canvas Layer */}
-          <canvas
-            ref={canvasRef}
-            className="block absolute top-0 left-0"
-            style={{
-              display: isLoading || error ? 'none' : 'block',
-            }}
-          />
-          
-          {/* Text Layer - for selection */}
-          <div
-            ref={textLayerRef}
-            className="absolute top-0 left-0"
-            style={{
-              display: isLoading || error ? 'none' : 'block',
-              pointerEvents: deleteMode ? 'none' : 'auto',
-            }}
-          />
+          </div>
+        )}
 
-          {/* Highlight Layer */}
-          {!isLoading && !error && (
-            <HighlightLayer
-              annotations={annotations}
-              page={currentPage}
-              scale={scale}
-              pageWidth={pageSize.width}
-              pageHeight={pageSize.height}
-              interactive={interactiveHighlights || deleteMode}
-              deleteMode={deleteMode}
-              onAnnotationClick={onHighlightClick}
-            />
-          )}
-        </div>
+        {!error && !isLoading && pageCount > 0 && (
+          Array.from({ length: pageCount }, (_, i) => i + 1).map((pageNumber) => {
+            const pageSize = pageSizes[pageNumber] ?? {
+              width: DEFAULT_PAGE_SIZE.width * scale,
+              height: DEFAULT_PAGE_SIZE.height * scale,
+            };
+            const isRendered = Boolean(renderedPages[pageNumber]);
 
-        {/* Page Number Indicator - Top Right */}
-        <div className="absolute -top-6 right-0 text-xs text-slate-400 font-medium">
-          {currentPage.toString().padStart(2, '0')}
-        </div>
+            return (
+              <div
+                key={pageNumber}
+                className="relative"
+                data-page-number={pageNumber}
+                ref={(node) => {
+                  setPageRefs(pageNumber, { card: node });
+                }}
+              >
+                <div
+                  className="bg-white rounded-lg shadow-xl overflow-hidden relative"
+                  style={{ width: pageSize.width, height: pageSize.height }}
+                >
+                  {!isRendered && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+                      <div className="w-6 h-6 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
+                    </div>
+                  )}
+
+                  <canvas
+                    ref={(node) => {
+                      setPageRefs(pageNumber, { canvas: node });
+                    }}
+                    className="block absolute top-0 left-0"
+                    style={{ display: isRendered ? 'block' : 'none' }}
+                  />
+
+                  <div
+                    ref={(node) => {
+                      setPageRefs(pageNumber, { textLayerContainer: node });
+                    }}
+                    className="absolute top-0 left-0"
+                    style={{
+                      display: isRendered ? 'block' : 'none',
+                      pointerEvents: deleteMode ? 'none' : 'auto',
+                    }}
+                  />
+
+                  {isRendered && (
+                    <HighlightLayer
+                      annotations={annotations}
+                      page={pageNumber}
+                      scale={scale}
+                      pageWidth={pageSize.width}
+                      pageHeight={pageSize.height}
+                      interactive={interactiveHighlights || deleteMode}
+                      deleteMode={deleteMode}
+                      onAnnotationClick={onHighlightClick}
+                    />
+                  )}
+                </div>
+
+                <div className="absolute -top-6 right-0 text-xs text-slate-400 font-medium">
+                  {pageNumber.toString().padStart(2, '0')}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
-      {/* Selection Toolbar */}
       {toolbarPosition && (
         <SelectionToolbar
           position={toolbarPosition}
