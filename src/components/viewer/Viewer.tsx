@@ -36,6 +36,7 @@ export function Viewer({
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showAnnotations, setShowAnnotations] = useState(false);
+  const [eraseMode, setEraseMode] = useState(false);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
@@ -52,6 +53,7 @@ export function Viewer({
   useEffect(() => {
     setSelectedAnnotationId(null);
     setShowAnnotations(false);
+    setEraseMode(false);
   }, [activeTabId]);
 
   const handleDocumentLoad = useCallback((pages: number, pdfOutline: OutlineItem[]) => {
@@ -140,10 +142,17 @@ export function Viewer({
   }, [handlePageChange]);
 
   const handleHighlightClick = useCallback((annotation: Annotation) => {
+    if (eraseMode) {
+      deleteAnnotation(annotation.id);
+      if (selectedAnnotationId === annotation.id) {
+        setSelectedAnnotationId(null);
+      }
+      return;
+    }
     setShowAnnotations(true);
     setSelectedAnnotationId(annotation.id);
     handlePageChange(annotation.page);
-  }, [handlePageChange]);
+  }, [deleteAnnotation, eraseMode, handlePageChange, selectedAnnotationId]);
 
   const handleDeleteAnnotation = useCallback((annotationId: string) => {
     deleteAnnotation(annotationId);
@@ -278,6 +287,7 @@ export function Viewer({
                 onAddHighlight={handleAddHighlight}
                 onHighlightClick={handleHighlightClick}
                 interactiveHighlights={false}
+                deleteMode={eraseMode}
               />
 
               <FloatingToolbar
@@ -290,6 +300,8 @@ export function Viewer({
                 onToggleAnnotations={() => setShowAnnotations((prev) => !prev)}
                 showContents={isSidebarOpen}
                 onToggleContents={() => setIsSidebarOpen((prev) => !prev)}
+                eraseMode={eraseMode}
+                onToggleEraseMode={() => setEraseMode((prev) => !prev)}
               />
             </div>
 

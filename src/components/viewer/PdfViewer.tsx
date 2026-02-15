@@ -25,6 +25,7 @@ interface PdfViewerProps {
   ) => void;
   onHighlightClick?: (annotation: Annotation) => void;
   interactiveHighlights?: boolean;
+  deleteMode?: boolean;
 }
 
 export function PdfViewer({
@@ -36,6 +37,7 @@ export function PdfViewer({
   onAddHighlight,
   onHighlightClick,
   interactiveHighlights = false,
+  deleteMode = false,
 }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
@@ -279,6 +281,13 @@ export function PdfViewer({
   }, []);
 
   const updateSelectionFromWindow = useCallback((clearOnInvalid: boolean = true) => {
+    if (deleteMode) {
+      if (clearOnInvalid) {
+        resetSelectionState(true);
+      }
+      return;
+    }
+
     const selection = window.getSelection();
 
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
@@ -312,7 +321,7 @@ export function PdfViewer({
     setSelectedText(info.text);
     setSelectedRects(info.rects);
     setToolbarPosition(info.mousePosition);
-  }, [getSelectionInfo, isSelectionInTextLayer, resetSelectionState]);
+  }, [deleteMode, getSelectionInfo, isSelectionInTextLayer, resetSelectionState]);
 
   // Selection is finalized on pointer-up to avoid toolbar flicker while dragging.
   useEffect(() => {
@@ -399,6 +408,13 @@ export function PdfViewer({
     resetSelectionState(true);
   }, [currentPage, scale, file, resetSelectionState]);
 
+  useEffect(() => {
+    if (deleteMode) {
+      isPointerSelectingRef.current = false;
+      resetSelectionState(true);
+    }
+  }, [deleteMode, resetSelectionState]);
+
   return (
     <div
       ref={containerRef}
@@ -443,6 +459,7 @@ export function PdfViewer({
             className="absolute top-0 left-0"
             style={{
               display: isLoading || error ? 'none' : 'block',
+              pointerEvents: deleteMode ? 'none' : 'auto',
             }}
           />
 
@@ -454,7 +471,8 @@ export function PdfViewer({
               scale={scale}
               pageWidth={pageSize.width}
               pageHeight={pageSize.height}
-              interactive={interactiveHighlights}
+              interactive={interactiveHighlights || deleteMode}
+              deleteMode={deleteMode}
               onAnnotationClick={onHighlightClick}
             />
           )}

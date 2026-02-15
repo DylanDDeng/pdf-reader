@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   Bookmark,
   Highlighter,
+  Eraser,
 } from 'lucide-react';
 
 interface FloatingToolbarProps {
@@ -19,6 +20,8 @@ interface FloatingToolbarProps {
   onToggleContents: () => void;
   showAnnotations: boolean;
   onToggleAnnotations: () => void;
+  eraseMode: boolean;
+  onToggleEraseMode: () => void;
 }
 
 export function FloatingToolbar({
@@ -31,6 +34,8 @@ export function FloatingToolbar({
   onToggleContents,
   showAnnotations,
   onToggleAnnotations,
+  eraseMode,
+  onToggleEraseMode,
 }: FloatingToolbarProps) {
   const [pageInput, setPageInput] = useState(String(currentPage));
 
@@ -57,6 +62,7 @@ export function FloatingToolbar({
   const tools = [
     { id: 'contents', icon: BookOpen, label: 'Contents', active: showContents, onClick: onToggleContents },
     { id: 'highlight', icon: Highlighter, label: 'Highlight', active: false, onClick: undefined },
+    { id: 'eraser', icon: Eraser, label: 'Erase Highlight', active: eraseMode, onClick: onToggleEraseMode },
     { id: 'bookmark', icon: Bookmark, label: 'Bookmark', active: false, onClick: undefined },
     { id: 'comments', icon: MessageSquare, label: 'Comments', active: showAnnotations, onClick: onToggleAnnotations },
   ];
@@ -154,7 +160,7 @@ export function FloatingToolbar({
       <div className="absolute bottom-4 left-4 z-10">
         <div className="bg-white/80 backdrop-blur-sm rounded-lg border border-slate-200 px-3 py-1.5 shadow-sm">
           <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">
-            Reading
+            {eraseMode ? 'Erase Mode' : 'Reading'}
           </span>
         </div>
       </div>

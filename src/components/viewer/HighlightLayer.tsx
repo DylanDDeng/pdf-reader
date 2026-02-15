@@ -9,6 +9,7 @@ interface HighlightLayerProps {
   pageWidth: number;
   pageHeight: number;
   interactive?: boolean;
+  deleteMode?: boolean;
   onAnnotationClick?: (annotation: Annotation) => void;
 }
 
@@ -19,6 +20,7 @@ export function HighlightLayer({
   pageWidth,
   pageHeight,
   interactive = false,
+  deleteMode = false,
   onAnnotationClick,
 }: HighlightLayerProps) {
   const pageAnnotations = useMemo(() => {
@@ -32,7 +34,7 @@ export function HighlightLayer({
   return (
     <div 
       className="absolute top-0 left-0 pointer-events-none"
-      style={{ width: pageWidth, height: pageHeight }}
+      style={{ width: pageWidth, height: pageHeight, zIndex: 2 }}
     >
       {pageAnnotations.map((annotation) => (
         <div key={annotation.id}>
@@ -41,17 +43,25 @@ export function HighlightLayer({
             return (
               <div
                 key={`${annotation.id}-${index}`}
-                className={`absolute transition-opacity hover:opacity-80 ${interactive ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
+                className={`absolute transition-opacity select-none ${interactive ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'} ${deleteMode ? 'hover:opacity-60 ring-1 ring-red-300' : 'hover:opacity-80'}`}
                 style={{
                   left: rect.left * scale,
                   top: rect.top * scale,
                   width: rect.width * scale,
                   height: rect.height * scale,
                   backgroundColor: color.bg,
+                  border: '1px solid transparent',
                   borderRadius: '2px',
-                  mixBlendMode: 'multiply',
+                }}
+                onPointerDown={(e) => {
+                  if (!interactive || !deleteMode) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onAnnotationClick?.(annotation);
                 }}
                 onClick={(e) => {
+                  if (!interactive) return;
+                  if (deleteMode) return;
                   e.stopPropagation();
                   onAnnotationClick?.(annotation);
                 }}

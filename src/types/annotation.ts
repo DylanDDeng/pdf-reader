@@ -1,11 +1,11 @@
 export type AnnotationType = 'highlight' | 'underline' | 'comment' | 'bookmark';
 
 export const HIGHLIGHT_COLORS = {
-  yellow: { bg: '#fef08a', border: '#facc15', name: '黄色' },
-  green: { bg: '#bbf7d0', border: '#4ade80', name: '绿色' },
-  red: { bg: '#fecaca', border: '#f87171', name: '红色' },
-  blue: { bg: '#bfdbfe', border: '#60a5fa', name: '蓝色' },
-  purple: { bg: '#e9d5ff', border: '#c084fc', name: '紫色' },
+  yellow: { bg: 'rgba(250, 204, 21, 0.32)', border: '#facc15', name: '黄色' },
+  green: { bg: 'rgba(74, 222, 128, 0.30)', border: '#4ade80', name: '绿色' },
+  red: { bg: 'rgba(248, 113, 113, 0.28)', border: '#f87171', name: '红色' },
+  blue: { bg: 'rgba(96, 165, 250, 0.30)', border: '#60a5fa', name: '蓝色' },
+  purple: { bg: 'rgba(192, 132, 252, 0.30)', border: '#c084fc', name: '紫色' },
 };
 
 export type HighlightColor = keyof typeof HIGHLIGHT_COLORS;
