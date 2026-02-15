@@ -985,10 +985,10 @@ export function PdfViewer({
   return (
     <div
       ref={containerRef}
-      className="h-full w-full overflow-y-auto overflow-x-auto bg-[#eef0f2] relative"
+      className="archive-reader-viewport h-full w-full overflow-y-auto overflow-x-auto relative"
       style={{ scrollbarGutter: 'stable both-edges' }}
     >
-      <div className="min-h-full flex flex-col items-center gap-8 px-8 py-8">
+      <div className="min-h-full flex flex-col items-center gap-12 px-10 py-14">
         {isLoading && (
           <div className="flex items-center justify-center w-full py-20">
             <div className="flex flex-col items-center gap-3">
@@ -1018,14 +1018,14 @@ export function PdfViewer({
             return (
               <div
                 key={pageNumber}
-                className="relative"
+                className="relative archive-document-frame"
                 data-page-number={pageNumber}
                 ref={(node) => {
                   setPageRefs(pageNumber, { card: node });
                 }}
               >
                 <div
-                  className="bg-white rounded-lg shadow-xl overflow-hidden relative"
+                  className="archive-document-page bg-white overflow-hidden relative"
                   style={{ width: pageSize.width, height: pageSize.height }}
                 >
                   {!isRendered && (
@@ -1086,7 +1086,7 @@ export function PdfViewer({
                   )}
                 </div>
 
-                <div className="absolute -top-6 right-0 text-xs text-slate-400 font-medium">
+                <div className="archive-document-page-num">
                   {pageNumber.toString().padStart(2, '0')}
                 </div>
               </div>

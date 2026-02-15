@@ -82,7 +82,7 @@ function App() {
   );
 
   return (
-    <div className={`flex h-screen overflow-hidden ${activeView === 'library' ? 'archive-shell-bg' : 'bg-[#f6f7f8] dark:bg-background-dark'}`}>
+    <div className="flex h-screen overflow-hidden archive-shell-bg">
       <Sidebar
         onImportFolder={handleImportFolder}
         activeView={activeView}
