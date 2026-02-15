@@ -114,6 +114,16 @@ export function Viewer({
     }
   }, [activeTab, onTabUpdate]);
 
+  const handleResetZoom = useCallback(() => {
+    if (!activeTab) {
+      return;
+    }
+
+    if (activeTab.scale !== 1) {
+      onTabUpdate(activeTab.id, { scale: 1 });
+    }
+  }, [activeTab, onTabUpdate]);
+
   const handleAddHighlight = useCallback((
     page: number,
     selectedText: string,
@@ -156,12 +166,21 @@ export function Viewer({
       } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault();
         handleNextPage();
+      } else if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        handleZoomIn();
+      } else if (e.key === '-') {
+        e.preventDefault();
+        handleZoomOut();
+      } else if (e.key === '0') {
+        e.preventDefault();
+        handleResetZoom();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, handlePrevPage, handleNextPage]);
+  }, [activeTab, handlePrevPage, handleNextPage, handleZoomIn, handleZoomOut, handleResetZoom]);
 
   if (tabs.length === 0) {
     return (
@@ -231,8 +250,11 @@ export function Viewer({
           <ReaderToolbar
             fileName={activeTab.fileName}
             scale={activeTab.scale}
+            canZoomIn={activeTab.scale < MAX_SCALE}
+            canZoomOut={activeTab.scale > MIN_SCALE}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
+            onResetZoom={handleResetZoom}
             onClose={() => onTabClose(activeTab.id)}
           />
 
@@ -261,6 +283,7 @@ export function Viewer({
               <FloatingToolbar
                 currentPage={activeTab.currentPage}
                 totalPages={totalPages}
+                onPageChange={handlePageChange}
                 onPrevPage={handlePrevPage}
                 onNextPage={handleNextPage}
                 showAnnotations={showAnnotations}
