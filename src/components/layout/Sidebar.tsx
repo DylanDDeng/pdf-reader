@@ -55,7 +55,7 @@ export function Sidebar({
             </div>
             {!isCollapsed && (
               <span className="font-bold text-[30px] leading-none tracking-tight text-[var(--archive-ink-black)]">
-                ARCHIVE.PDF
+                DocFlow
               </span>
             )}
           </div>

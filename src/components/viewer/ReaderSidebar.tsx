@@ -170,7 +170,7 @@ export function ReaderSidebar({
     <aside className="archive-reader-sidebar">
       <button onClick={onBack} className="archive-reader-brand" title="返回库视图">
         <span className="archive-reader-brand-icon" />
-        <span>ARCHIVE.PDF / BACK</span>
+        <span>DocFlow / Back</span>
       </button>
 
       <div className="archive-doc-nav-header">
