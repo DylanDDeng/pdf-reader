@@ -81,7 +81,6 @@ export function Sidebar({
             {renderNavItem('All Documents', activeView === 'library', 'circle', () => onViewChange('library'))}
             {renderNavItem('Favorites', false, 'square')}
             {renderNavItem('Recent', activeView === 'reader', 'circle', () => onViewChange('reader'))}
-            {renderNavItem('Shared', false, 'square')}
           </nav>
         </div>
 
