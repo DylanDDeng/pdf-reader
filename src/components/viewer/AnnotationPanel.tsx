@@ -78,6 +78,7 @@ export function AnnotationPanel({
           const color = HIGHLIGHT_COLORS[ann.color];
           const isEditing = editingId === ann.id;
           const isSelected = selectedAnnotationId === ann.id;
+          const typeLabel = ann.type === 'underline' ? '下划线' : '高亮';
 
           return (
             <div
@@ -101,6 +102,7 @@ export function AnnotationPanel({
                   className="w-3 h-3 rounded-full"
                   style={{ backgroundColor: color.border }}
                 />
+                <span className="text-[11px] text-slate-500">{typeLabel}</span>
                 <span className="text-xs text-slate-400">第 {ann.page} 页</span>
                 <span className="text-xs text-slate-300">
                   {new Date(ann.createdAt).toLocaleDateString()}

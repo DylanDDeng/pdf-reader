@@ -25,6 +25,12 @@ interface PdfViewerProps {
     color: HighlightColor,
     rects: Array<{ left: number; top: number; width: number; height: number }>
   ) => void;
+  onAddUnderline: (
+    page: number,
+    selectedText: string,
+    color: HighlightColor,
+    rects: Array<{ left: number; top: number; width: number; height: number }>
+  ) => void;
   onHighlightClick?: (annotation: Annotation) => void;
   interactiveHighlights?: boolean;
   deleteMode?: boolean;
@@ -65,6 +71,7 @@ export function PdfViewer({
   onDocumentLoad,
   onPageChange,
   onAddHighlight,
+  onAddUnderline,
   onHighlightClick,
   interactiveHighlights = false,
   deleteMode = false,
@@ -937,7 +944,7 @@ export function PdfViewer({
   }, [deleteMode, ensurePageTextLayer, isPageTextLayerReady, resetSelectionState, updateSelectionFromWindow]);
 
   const handleToolbarAction = (action: AnnotationAction) => {
-    if (action !== 'highlight' || !selectedText || selectedRects.length === 0 || !selectedPage) {
+    if (!selectedText || selectedRects.length === 0 || !selectedPage) {
       return;
     }
 
@@ -948,7 +955,13 @@ export function PdfViewer({
       height: rect.height / scale,
     }));
 
-    onAddHighlight(selectedPage, selectedText, selectedColor, scaledRects);
+    if (action === 'highlight') {
+      onAddHighlight(selectedPage, selectedText, selectedColor, scaledRects);
+    } else if (action === 'underline') {
+      onAddUnderline(selectedPage, selectedText, selectedColor, scaledRects);
+    } else {
+      return;
+    }
     resetSelectionState(true);
   };
 

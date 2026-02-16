@@ -71,7 +71,7 @@ export function SelectionToolbar({
   }, [onClose]);
 
   const handleAction = (action: AnnotationAction) => {
-    if (action === 'highlight') {
+    if (action === 'highlight' || action === 'underline') {
       onAction(action);
       onClose();
     }
@@ -110,9 +110,9 @@ export function SelectionToolbar({
 
         {/* 下划线按钮 */}
         <button
-          disabled
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-300 cursor-not-allowed"
-          title="下划线（暂不可用）"
+          onClick={() => handleAction('underline')}
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+          title="下划线"
         >
           <Underline className="w-4 h-4" />
         </button>

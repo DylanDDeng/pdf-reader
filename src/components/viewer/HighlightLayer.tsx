@@ -40,18 +40,29 @@ export function HighlightLayer({
         <div key={annotation.id}>
           {annotation.rects.map((rect, index) => {
             const color = HIGHLIGHT_COLORS[annotation.color];
+            const type = annotation.type ?? 'highlight';
+            const isUnderline = type === 'underline';
+            const scaledLeft = rect.left * scale;
+            const scaledTop = rect.top * scale;
+            const scaledWidth = rect.width * scale;
+            const scaledHeight = rect.height * scale;
+            const underlineThickness = Math.max(2, Math.round(scale * 1.4));
+            const underlineTop = Math.max(
+              scaledTop + scaledHeight - underlineThickness,
+              scaledTop
+            );
             return (
               <div
                 key={`${annotation.id}-${index}`}
                 className={`absolute transition-opacity select-none ${interactive ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'} ${deleteMode ? 'hover:opacity-60 ring-1 ring-red-300' : 'hover:opacity-80'}`}
                 style={{
-                  left: rect.left * scale,
-                  top: rect.top * scale,
-                  width: rect.width * scale,
-                  height: rect.height * scale,
-                  backgroundColor: color.bg,
-                  border: '1px solid transparent',
-                  borderRadius: '2px',
+                  left: scaledLeft,
+                  top: isUnderline ? underlineTop : scaledTop,
+                  width: scaledWidth,
+                  height: isUnderline ? underlineThickness : scaledHeight,
+                  backgroundColor: isUnderline ? color.border : color.bg,
+                  border: isUnderline ? 'none' : '1px solid transparent',
+                  borderRadius: isUnderline ? 0 : '2px',
                 }}
                 onPointerDown={(e) => {
                   if (!interactive || !deleteMode) return;

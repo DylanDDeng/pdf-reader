@@ -44,6 +44,7 @@ export function Viewer({
   const {
     annotations,
     addHighlight,
+    addUnderline,
     deleteAnnotation,
     updateComment,
     getAllAnnotations,
@@ -140,6 +141,17 @@ export function Viewer({
     setShowAnnotations(true);
     setSelectedAnnotationId(annotation.id);
   }, [addHighlight]);
+
+  const handleAddUnderline = useCallback((
+    page: number,
+    selectedText: string,
+    color: HighlightColor,
+    rects: Array<{ left: number; top: number; width: number; height: number }>
+  ) => {
+    const annotation = addUnderline(page, selectedText, color, rects);
+    setShowAnnotations(true);
+    setSelectedAnnotationId(annotation.id);
+  }, [addUnderline]);
 
   const handleAnnotationPageChange = useCallback((page: number) => {
     handlePageChange(page);
@@ -292,6 +304,7 @@ export function Viewer({
                 onDocumentLoad={handleDocumentLoad}
                 onPageChange={handlePageChange}
                 onAddHighlight={handleAddHighlight}
+                onAddUnderline={handleAddUnderline}
                 onHighlightClick={handleHighlightClick}
                 interactiveHighlights={false}
                 deleteMode={eraseMode}

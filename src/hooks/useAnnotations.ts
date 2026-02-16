@@ -45,8 +45,8 @@ export function useAnnotations(fileId: string | null) {
     setIsLoaded(true);
   }, [fileId]);
 
-  // Add a new highlight annotation
-  const addHighlight = useCallback((
+  const addAnnotation = useCallback((
+    type: Annotation['type'],
     page: number,
     selectedText: string,
     color: HighlightColor,
@@ -54,7 +54,7 @@ export function useAnnotations(fileId: string | null) {
   ): Annotation => {
     const newAnnotation: Annotation = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      type: 'highlight',
+      type,
       page,
       selectedText,
       color,
@@ -71,6 +71,26 @@ export function useAnnotations(fileId: string | null) {
 
     return newAnnotation;
   }, [persistAnnotations]);
+
+  // Add a new highlight annotation
+  const addHighlight = useCallback((
+    page: number,
+    selectedText: string,
+    color: HighlightColor,
+    rects: Array<{ left: number; top: number; width: number; height: number }>
+  ): Annotation => {
+    return addAnnotation('highlight', page, selectedText, color, rects);
+  }, [addAnnotation]);
+
+  // Add a new underline annotation
+  const addUnderline = useCallback((
+    page: number,
+    selectedText: string,
+    color: HighlightColor,
+    rects: Array<{ left: number; top: number; width: number; height: number }>
+  ): Annotation => {
+    return addAnnotation('underline', page, selectedText, color, rects);
+  }, [addAnnotation]);
 
   // Update annotation comment
   const updateComment = useCallback((annotationId: string, comment: string) => {
@@ -123,6 +143,7 @@ export function useAnnotations(fileId: string | null) {
     annotations,
     isLoaded,
     addHighlight,
+    addUnderline,
     updateComment,
     updateColor,
     deleteAnnotation,
