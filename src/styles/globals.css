@@ -266,13 +266,12 @@ input:focus-visible {
   flex-direction: column;
   aspect-ratio: 0.75;
   cursor: pointer;
-  border: 1px solid transparent;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
   transition: transform 0.28s ease, box-shadow 0.28s ease;
   box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
+  overflow: visible;
   isolation: isolate;
-  -webkit-mask:
-    radial-gradient(circle at 4px 4px, transparent 4px, #000 4.5px) -4px -4px / 16px 16px;
 }
 
 .archive-card::before {
@@ -280,9 +279,10 @@ input:focus-visible {
   position: absolute;
   inset: 0;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='archiveCardNoise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.35' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23archiveCardNoise)' opacity='0.14'/%3E%3C/svg%3E");
-  opacity: 0.35;
+  opacity: 0.2;
   pointer-events: none;
   z-index: 0;
+  border-radius: 10px;
 }
 
 .archive-card:hover {
@@ -305,7 +305,7 @@ input:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 48px;
+  padding-right: 88px;
 }
 
 .archive-meta-label {
@@ -319,6 +319,7 @@ input:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: 88px;
 }
 
 .archive-thumbnail-container {

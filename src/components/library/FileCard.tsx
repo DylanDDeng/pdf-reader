@@ -62,7 +62,6 @@ export function FileCard({
   const [renameValue, setRenameValue] = useState(name);
   const [isRenamingInProgress, setIsRenamingInProgress] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -170,15 +169,12 @@ export function FileCard({
   const handleContextMenuClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setMenuPosition({ x: rect.right + 6, y: rect.bottom + 6 });
     setShowContextMenu((prev) => !prev);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenuPosition({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
   };
 
@@ -274,7 +270,7 @@ export function FileCard({
           <div className="relative" ref={menuRef}>
             <button
               onClick={handleContextMenuClick}
-              className="p-1.5 rounded-lg text-black/25 hover:text-black/60 opacity-0 group-hover:opacity-100 transition-colors"
+              className="p-1.5 rounded-lg text-black/35 hover:text-black/70 opacity-90 transition-colors"
               title="More options"
             >
               <MoreVertical className="w-4 h-4" />
@@ -282,8 +278,7 @@ export function FileCard({
 
             {showContextMenu && (
               <div
-                className="fixed bg-white rounded-lg shadow-lg border border-black/10 py-1 z-50 min-w-[120px]"
-                style={{ left: menuPosition.x, top: menuPosition.y }}
+                className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-black/10 py-1 z-50 min-w-[120px]"
               >
                 {onRename && (
                   <button
@@ -357,7 +352,7 @@ export function FileCard({
           <div className="relative" ref={menuRef}>
             <button
               onClick={handleContextMenuClick}
-              className="archive-icon-btn text-black/30 opacity-0 group-hover:opacity-100"
+              className="archive-icon-btn text-black/40 opacity-100"
               title="More options"
             >
               <MoreVertical className="w-3.5 h-3.5" />
@@ -365,8 +360,7 @@ export function FileCard({
 
             {showContextMenu && (
               <div
-                className="fixed bg-white rounded-lg shadow-lg border border-black/10 py-1 z-50 min-w-[120px]"
-                style={{ left: menuPosition.x, top: menuPosition.y }}
+                className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-black/10 py-1 z-50 min-w-[120px]"
               >
                 {onRename && (
                   <button
