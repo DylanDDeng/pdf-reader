@@ -86,16 +86,6 @@ export function Sidebar({
         </div>
 
         <div className="mt-auto">
-          {!isCollapsed && (
-            <div className="mb-6">
-              <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--archive-ink-grey)]">Storage</span>
-              <div className="h-1.5 w-full mt-2 bg-black/10 relative overflow-hidden">
-                <div className="absolute inset-y-0 left-0 w-[64%] bg-[var(--archive-rust)]" />
-              </div>
-              <div className="text-right text-[11px] mt-1.5 text-[var(--archive-ink-grey)] font-semibold">64% Used</div>
-            </div>
-          )}
-
           <div className="border-t border-black/10 border-dashed pt-4 space-y-2">
             <button
               onClick={toggleTheme}
