@@ -58,6 +58,12 @@ interface SelectionInfo {
   mousePosition: { x: number; y: number };
 }
 
+interface LayerPointerInfo {
+  pageNumber: number;
+  x: number;
+  y: number;
+}
+
 const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 };
 const SCROLL_SYNC_DELAY_MS = 420;
 const CANVAS_BUFFER_VIEWPORTS = 2.5;
@@ -98,6 +104,7 @@ export function PdfViewer({
   const renderedCanvasScaleRef = useRef<Map<number, number>>(new Map());
   const renderedTextScaleRef = useRef<Map<number, number>>(new Map());
   const scheduleVisiblePageRenderRef = useRef<() => void>(() => {});
+  const lastLayerPointerRef = useRef<LayerPointerInfo | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -779,6 +786,51 @@ export function PdfViewer({
     };
   }, []);
 
+  const findAnnotationAtLayerPoint = useCallback((
+    pageNumber: number,
+    x: number,
+    y: number
+  ): Annotation | null => {
+    const pageAnnotations = annotations.filter((ann) => ann.page === pageNumber);
+    if (pageAnnotations.length === 0) {
+      return null;
+    }
+
+    const hitPadding = 2;
+    const underlinePadding = 5;
+
+    for (let i = pageAnnotations.length - 1; i >= 0; i -= 1) {
+      const annotation = pageAnnotations[i];
+      const type = annotation.type ?? 'highlight';
+
+      for (const rect of annotation.rects) {
+        const left = rect.left * scale;
+        const top = rect.top * scale;
+        const width = rect.width * scale;
+        const height = rect.height * scale;
+
+        if (type === 'underline') {
+          const underlineThickness = Math.max(2, Math.round(scale * 1.4));
+          const underlineTop = Math.max(top + height - underlineThickness, top);
+          const inUnderlineX = x >= left - underlinePadding && x <= left + width + underlinePadding;
+          const inUnderlineY = y >= underlineTop - underlinePadding && y <= underlineTop + underlineThickness + underlinePadding;
+          if (inUnderlineX && inUnderlineY) {
+            return annotation;
+          }
+          continue;
+        }
+
+        const inRectX = x >= left - hitPadding && x <= left + width + hitPadding;
+        const inRectY = y >= top - hitPadding && y <= top + height + hitPadding;
+        if (inRectX && inRectY) {
+          return annotation;
+        }
+      }
+    }
+
+    return null;
+  }, [annotations, scale]);
+
   const updateSelectionFromWindow = useCallback((clearOnInvalid: boolean = true) => {
     if (deleteMode) {
       if (clearOnInvalid) {
@@ -841,12 +893,23 @@ export function PdfViewer({
       const element = event.target.nodeType === Node.ELEMENT_NODE
         ? (event.target as HTMLElement)
         : event.target.parentElement;
-      const layer = element?.closest('.textLayer');
+      const layer = element?.closest('.textLayer') as HTMLDivElement | null;
+      if (!layer) {
+        lastLayerPointerRef.current = null;
+      }
       if (!layer) {
         return;
       }
+      const layerRect = layer.getBoundingClientRect();
       const pageAttr = (layer as HTMLDivElement).dataset.pageNumber;
       const pageNumber = pageAttr ? Number.parseInt(pageAttr, 10) : NaN;
+      if (Number.isFinite(pageNumber)) {
+        lastLayerPointerRef.current = {
+          pageNumber,
+          x: event.clientX - layerRect.left,
+          y: event.clientY - layerRect.top,
+        };
+      }
       if (!isPageTextLayerReady(pageNumber, layer as HTMLDivElement)) {
         suppressSelectionEventsRef.current = true;
         pendingReadyPageRef.current = Number.isFinite(pageNumber) ? pageNumber : null;
@@ -899,6 +962,53 @@ export function PdfViewer({
       }, 20);
     };
 
+    const handleClick = (event: MouseEvent) => {
+      if (deleteMode || !onHighlightClick) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) {
+        return;
+      }
+      if (toolbarPosition) {
+        return;
+      }
+
+      const element = event.target instanceof Node
+        ? (event.target.nodeType === Node.ELEMENT_NODE
+            ? (event.target as HTMLElement)
+            : event.target.parentElement)
+        : null;
+      const layer = element?.closest('.textLayer') as HTMLDivElement | null;
+      if (!layer || !layer.isConnected) {
+        return;
+      }
+
+      const pageAttr = layer.dataset.pageNumber;
+      const pageNumber = pageAttr ? Number.parseInt(pageAttr, 10) : NaN;
+      if (!Number.isFinite(pageNumber)) {
+        return;
+      }
+
+      const layerRect = layer.getBoundingClientRect();
+      const clickX = event.clientX - layerRect.left;
+      const clickY = event.clientY - layerRect.top;
+
+      const pointer = lastLayerPointerRef.current;
+      const hasPointerPoint = Boolean(pointer && pointer.pageNumber === pageNumber);
+      const hitX = hasPointerPoint ? pointer!.x : clickX;
+      const hitY = hasPointerPoint ? pointer!.y : clickY;
+
+      const annotation = findAnnotationAtLayerPoint(pageNumber, hitX, hitY);
+      if (!annotation) {
+        return;
+      }
+
+      event.stopPropagation();
+      onHighlightClick(annotation);
+    };
+
     const handleSelectionChange = () => {
       if (suppressSelectionEventsRef.current) {
         return;
@@ -922,12 +1032,14 @@ export function PdfViewer({
 
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('pointerup', handlePointerUp, true);
+    document.addEventListener('click', handleClick, true);
     document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('keyup', handleKeySelection, true);
 
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('pointerup', handlePointerUp, true);
+      document.removeEventListener('click', handleClick, true);
       document.removeEventListener('selectionchange', handleSelectionChange);
       document.removeEventListener('keyup', handleKeySelection, true);
       if (selectionTimeoutRef.current) {
@@ -938,10 +1050,20 @@ export function PdfViewer({
       }
       suppressSelectionEventsRef.current = false;
       pendingReadyPageRef.current = null;
+      lastLayerPointerRef.current = null;
       selectionRenderLockRef.current = false;
       selectionRenderUnlockTimerRef.current = null;
     };
-  }, [deleteMode, ensurePageTextLayer, isPageTextLayerReady, resetSelectionState, updateSelectionFromWindow]);
+  }, [
+    deleteMode,
+    ensurePageTextLayer,
+    findAnnotationAtLayerPoint,
+    isPageTextLayerReady,
+    onHighlightClick,
+    resetSelectionState,
+    toolbarPosition,
+    updateSelectionFromWindow,
+  ]);
 
   const handleToolbarAction = (action: AnnotationAction) => {
     if (!selectedText || selectedRects.length === 0 || !selectedPage) {
