@@ -624,6 +624,14 @@ input:focus-visible {
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
+.archive-tool-btn-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
 .archive-tool-btn:hover {
   background: #fff;
   border-color: rgba(0, 0, 0, 0.28);
@@ -869,5 +877,11 @@ input:focus-visible {
   .archive-tool-btn {
     padding: 6px 9px;
     font-size: 0.72rem;
+  }
+
+  .archive-tool-btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
   }
 }

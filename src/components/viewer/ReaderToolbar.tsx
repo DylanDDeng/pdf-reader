@@ -1,3 +1,5 @@
+import { PanelLeft, MousePointer2, Highlighter, MessageSquare, Eraser } from 'lucide-react';
+
 interface ReaderToolbarProps {
   scale: number;
   canZoomIn: boolean;
@@ -34,10 +36,11 @@ export function ReaderToolbar({
       <div className="archive-tool-group">
         <button
           onClick={onToggleContents}
-          className={`archive-tool-btn ${showContents ? 'active' : ''}`}
-          title="显示/隐藏页面侧栏"
+          className={`archive-tool-btn archive-tool-btn-icon ${showContents ? 'active' : ''}`}
+          title="页面缩略图（显示/隐藏）"
+          aria-label="页面缩略图（显示/隐藏）"
         >
-          Pages
+          <PanelLeft className="w-4 h-4" />
         </button>
 
         <button
@@ -46,10 +49,11 @@ export function ReaderToolbar({
               onToggleEraseMode();
             }
           }}
-          className={`archive-tool-btn ${selectActive ? 'active' : ''}`}
-          title="选择文本"
+          className={`archive-tool-btn archive-tool-btn-icon ${selectActive ? 'active' : ''}`}
+          title="选择文本（拖拽文字）"
+          aria-label="选择文本（拖拽文字）"
         >
-          Select
+          <MousePointer2 className="w-4 h-4" />
         </button>
 
         <button
@@ -58,26 +62,29 @@ export function ReaderToolbar({
               onToggleEraseMode();
             }
           }}
-          className="archive-tool-btn"
-          title="高亮模式"
+          className={`archive-tool-btn archive-tool-btn-icon ${selectActive ? 'active' : ''}`}
+          title="高亮/下划线（先选中文本）"
+          aria-label="高亮/下划线（先选中文本）"
         >
-          Highlight
+          <Highlighter className="w-4 h-4" />
         </button>
 
         <button
           onClick={onToggleAnnotations}
-          className={`archive-tool-btn ${showAnnotations ? 'active' : ''}`}
-          title="显示/隐藏批注面板"
+          className={`archive-tool-btn archive-tool-btn-icon ${showAnnotations ? 'active' : ''}`}
+          title="批注面板（显示/隐藏）"
+          aria-label="批注面板（显示/隐藏）"
         >
-          Note
+          <MessageSquare className="w-4 h-4" />
         </button>
 
         <button
           onClick={onToggleEraseMode}
-          className={`archive-tool-btn ${eraseMode ? 'active' : ''}`}
-          title="擦除高亮"
+          className={`archive-tool-btn archive-tool-btn-icon ${eraseMode ? 'active' : ''}`}
+          title="擦除标注（点击高亮删除）"
+          aria-label="擦除标注（点击高亮删除）"
         >
-          Draw
+          <Eraser className="w-4 h-4" />
         </button>
       </div>
 
