@@ -13,6 +13,7 @@ import type {
   FolderChangedEvent,
   ScannedFile,
 } from '../types/library';
+import type { ArxivImportOutcome } from '../types/arxiv';
 import * as libraryService from '../services/libraryService';
 
 export interface UseLibraryReturn {
@@ -27,6 +28,10 @@ export interface UseLibraryReturn {
   // Actions
   scanDirectory: (path: string, recursive?: boolean) => Promise<ScanResult>;
   importFiles: (files: ScannedFile[]) => Promise<ImportResult>;
+  importFromArxiv: (
+    linkOrId: string,
+    downloadFolder: string | null
+  ) => Promise<ArxivImportOutcome>;
   addWatchedFolder: (path: string, recursive?: boolean) => Promise<void>;
   removeWatchedFolder: (watchId: string) => Promise<void>;
   toggleWatchedFolder: (watchId: string) => void;
@@ -387,6 +392,104 @@ export function useLibrary(): UseLibraryReturn {
     setState(savedState);
   }, []);
 
+  const importFromArxiv = useCallback(async (
+    linkOrId: string,
+    downloadFolder: string | null
+  ): Promise<ArxivImportOutcome> => {
+    const normalizedLink = linkOrId.trim();
+    if (!normalizedLink) {
+      return {
+        status: 'error',
+        message: 'Please enter an arXiv URL or ID.',
+      };
+    }
+
+    if (!downloadFolder) {
+      return {
+        status: 'error',
+        message: 'Please set the default arXiv download folder in Settings first.',
+      };
+    }
+
+    setIsLoading(true);
+    setImportProgress({
+      current: 0,
+      total: 1,
+      currentFile: normalizedLink,
+      status: 'importing',
+    });
+
+    try {
+      const arxivResult = await libraryService.importArxivPaper({
+        input_url_or_id: normalizedLink,
+        target_dir: downloadFolder,
+        conflict_policy: 'skip',
+      });
+
+      if (arxivResult.status === 'skipped') {
+        const reason = arxivResult.reason ?? 'unknown';
+        const messageByReason: Record<string, string> = {
+          file_exists: 'This paper already exists in your download folder. Skipped.',
+          invalid_link: 'Invalid arXiv URL or ID.',
+          paper_not_found: 'Paper not found on arXiv.',
+          write_failed: 'Cannot write files to the selected folder.',
+          network_error: 'Network error while downloading from arXiv.',
+          invalid_conflict_policy: 'Unsupported conflict policy.',
+        };
+
+        return {
+          status: reason === 'file_exists' ? 'skipped' : 'error',
+          message: messageByReason[reason] ?? `Import failed (${reason}).`,
+          paperTitle: arxivResult.paper?.title,
+          pdfPath: arxivResult.pdf_path,
+        };
+      }
+
+      const scannedFile = libraryService.createScannedFileFromArxivResult(arxivResult);
+      if (!scannedFile) {
+        return {
+          status: 'error',
+          message: 'Downloaded paper metadata is incomplete.',
+        };
+      }
+
+      const importResult = await libraryService.importFiles(
+        state.items,
+        [scannedFile],
+        'arxiv'
+      );
+
+      if (importResult.importedItems.length > 0) {
+        const newItems = [...importResult.importedItems, ...state.items];
+        const newState = { ...state, items: newItems };
+        libraryService.saveLibrary(newState);
+        setState(newState);
+      }
+
+      return {
+        status: 'downloaded',
+        message: 'arXiv paper downloaded and imported successfully.',
+        paperTitle: arxivResult.paper?.title,
+        pdfPath: arxivResult.pdf_path,
+      };
+    } catch (error) {
+      console.error('Error importing arXiv paper:', error);
+      return {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to import from arXiv.',
+      };
+    } finally {
+      setIsLoading(false);
+      setImportProgress({
+        current: 1,
+        total: 1,
+        currentFile: '',
+        status: 'completed',
+      });
+      setTimeout(() => setImportProgress(null), 1200);
+    }
+  }, [state]);
+
   return {
     items: state.items,
     watchedFolders: state.watchedFolders,
@@ -396,6 +499,7 @@ export function useLibrary(): UseLibraryReturn {
     lastSyncResult,
     scanDirectory,
     importFiles,
+    importFromArxiv,
     addWatchedFolder,
     removeWatchedFolder,
     toggleWatchedFolder,

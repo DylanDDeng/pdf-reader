@@ -20,7 +20,7 @@ export interface LibraryItem {
   size?: number;
   lastOpened: string;
   addedAt: string;
-  source: 'manual' | 'imported' | 'watched';
+  source: 'manual' | 'imported' | 'watched' | 'arxiv';
   metadata?: PdfMetadata;
   favorite?: boolean;
   tags?: string[];

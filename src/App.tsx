@@ -9,6 +9,7 @@ import { useReaderSettings } from './hooks/useReaderSettings';
 import { useReadingProgress } from './hooks/useReadingProgress';
 import { getDocumentKey } from './utils/documentKey';
 import type { ScannedFile, ImportResult as ImportResultType } from './types/library';
+import type { ArxivImportOutcome } from './types/arxiv';
 
 function App() {
   const [activeView, setActiveView] = useState<'library' | 'reader'>('library');
@@ -24,7 +25,7 @@ function App() {
     switchTab,
     updateTab,
   } = useTabs();
-  const { settings, setOpenFileLocation } = useReaderSettings();
+  const { settings, setOpenFileLocation, setArxivDownloadFolder } = useReaderSettings();
   const { getLastPage, setLastPage } = useReadingProgress();
 
   // Use the library hook for managing PDF library
@@ -32,6 +33,7 @@ function App() {
     items: libraryItems,
     importProgress,
     importFiles,
+    importFromArxiv,
     updateItem,
     toggleFavorite,
     removeItem,
@@ -98,6 +100,13 @@ function App() {
     [importFiles]
   );
 
+  const handleImportFromArxiv = useCallback(
+    async (linkOrId: string): Promise<ArxivImportOutcome> => {
+      return importFromArxiv(linkOrId, settings.arxivDownloadFolder);
+    },
+    [importFromArxiv, settings.arxivDownloadFolder]
+  );
+
   const handleTabUpdate = useCallback((
     tabId: string,
     updates: Partial<Omit<Tab, 'id' | 'file' | 'fileName' | 'annotationKey'>>
@@ -134,6 +143,8 @@ function App() {
             onOpenFile={handleOpenFile}
             items={libraryItems}
             onImportFiles={handleImportFiles}
+            onImportFromArxiv={handleImportFromArxiv}
+            arxivDownloadFolder={settings.arxivDownloadFolder}
             onToggleFavorite={toggleFavorite}
             onRemoveItem={removeItem}
             onRenameItem={renameItem}
@@ -157,6 +168,7 @@ function App() {
         settings={settings}
         onClose={() => setIsSettingsOpen(false)}
         onChangeOpenFileLocation={setOpenFileLocation}
+        onChangeArxivDownloadFolder={setArxivDownloadFolder}
       />
     </div>
   );

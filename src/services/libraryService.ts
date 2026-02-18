@@ -13,6 +13,7 @@ import type {
   ImportResult,
   FolderChangedEvent,
 } from '../types/library';
+import type { ArxivImportRequest, ArxivImportResult } from '../types/arxiv';
 
 const LIBRARY_STORAGE_KEY = 'pdfLibrary';
 const RECENT_FILES_KEY = 'recentFiles';
@@ -100,7 +101,7 @@ export async function extractMetadata(
 // Create a library item from a scanned file
 export async function createLibraryItem(
   file: ScannedFile,
-  source: 'manual' | 'imported' | 'watched' = 'imported'
+  source: 'manual' | 'imported' | 'watched' | 'arxiv' = 'imported'
 ): Promise<LibraryItem> {
   const metadata = await extractMetadata(file.path);
 
@@ -202,7 +203,7 @@ export function updateLibraryItem(
 export async function importFiles(
   currentItems: LibraryItem[],
   files: ScannedFile[],
-  source: 'manual' | 'imported' | 'watched' = 'imported',
+  source: 'manual' | 'imported' | 'watched' | 'arxiv' = 'imported',
   onProgress?: (current: number, total: number, fileName: string) => void
 ): Promise<ImportResult> {
   const result: ImportResult = {
@@ -431,4 +432,42 @@ export async function renamePdfFile(
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
+}
+
+function getFileNameFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || 'Unknown.pdf';
+}
+
+export async function importArxivPaper(
+  request: ArxivImportRequest
+): Promise<ArxivImportResult> {
+  try {
+    return await invoke<ArxivImportResult>('import_arxiv_paper', {
+      inputUrlOrId: request.input_url_or_id,
+      targetDir: request.target_dir,
+      conflictPolicy: request.conflict_policy,
+    });
+  } catch (error) {
+    console.error('Error importing arXiv paper:', error);
+    return {
+      status: 'skipped',
+      reason: 'network_error',
+    };
+  }
+}
+
+export function createScannedFileFromArxivResult(
+  result: ArxivImportResult
+): ScannedFile | null {
+  if (result.status !== 'downloaded' || !result.pdf_path || !result.pdf_size) {
+    return null;
+  }
+
+  return {
+    name: getFileNameFromPath(result.pdf_path),
+    path: result.pdf_path,
+    size: result.pdf_size,
+  };
 }

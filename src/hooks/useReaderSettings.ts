@@ -5,6 +5,7 @@ const STORAGE_KEY = 'pdf-reader-settings';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   openFileLocation: 'last_read_page',
+  arxivDownloadFolder: null,
 };
 
 function isOpenFileLocationMode(value: unknown): value is OpenFileLocationMode {
@@ -19,12 +20,16 @@ function loadSettings(): ReaderSettings {
     }
 
     const parsed = JSON.parse(stored) as Partial<ReaderSettings>;
-    if (!isOpenFileLocationMode(parsed.openFileLocation)) {
-      return DEFAULT_SETTINGS;
-    }
+    const openFileLocation = isOpenFileLocationMode(parsed.openFileLocation)
+      ? parsed.openFileLocation
+      : DEFAULT_SETTINGS.openFileLocation;
 
     return {
-      openFileLocation: parsed.openFileLocation,
+      openFileLocation,
+      arxivDownloadFolder:
+        typeof parsed.arxivDownloadFolder === 'string' && parsed.arxivDownloadFolder.trim().length > 0
+          ? parsed.arxivDownloadFolder
+          : null,
     };
   } catch (error) {
     console.error('Failed to load reader settings:', error);
@@ -52,10 +57,20 @@ export function useReaderSettings() {
     });
   }, []);
 
+  const setArxivDownloadFolder = useCallback((folder: string | null) => {
+    const normalized = folder && folder.trim().length > 0 ? folder.trim() : null;
+    setSettings((prev) => {
+      if (prev.arxivDownloadFolder === normalized) {
+        return prev;
+      }
+      return { ...prev, arxivDownloadFolder: normalized };
+    });
+  }, []);
+
   return {
     settings,
     setSettings,
     setOpenFileLocation,
+    setArxivDownloadFolder,
   };
 }
-

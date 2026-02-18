@@ -990,6 +990,12 @@ input:focus-visible {
   line-height: 1.45;
 }
 
+.archive-settings-section-divider {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.14);
+}
+
 .archive-settings-options {
   margin-top: 14px;
   display: grid;
@@ -1072,6 +1078,145 @@ input:focus-visible {
   justify-content: flex-end;
 }
 
+.archive-settings-folder-row {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.archive-settings-folder-display {
+  min-height: 42px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--archive-ink-black);
+}
+
+.archive-settings-folder-display span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archive-settings-folder-placeholder {
+  color: rgba(26, 26, 26, 0.5);
+}
+
+.archive-import-mode-toggle {
+  width: fit-content;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.6);
+  display: inline-flex;
+  gap: 4px;
+}
+
+.archive-import-mode-btn {
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: rgba(26, 26, 26, 0.72);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.archive-import-mode-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--archive-ink-black);
+}
+
+.archive-import-mode-btn.is-active {
+  background: var(--archive-ink-black);
+  color: #fff;
+}
+
+.archive-arxiv-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.archive-arxiv-row {
+  display: grid;
+  gap: 8px;
+}
+
+.archive-arxiv-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: rgba(26, 26, 26, 0.72);
+}
+
+.archive-arxiv-input-wrap,
+.archive-arxiv-folder-display {
+  min-height: 42px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.76);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.archive-arxiv-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 100%;
+  color: var(--archive-ink-black);
+  font-size: 14px;
+}
+
+.archive-arxiv-folder-display span {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archive-arxiv-placeholder {
+  color: rgba(26, 26, 26, 0.5);
+}
+
+.archive-arxiv-feedback {
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--archive-ink-black);
+}
+
+.archive-arxiv-feedback.is-success {
+  border-color: rgba(74, 139, 92, 0.45);
+  background: rgba(74, 139, 92, 0.08);
+}
+
+.archive-arxiv-feedback.is-info {
+  border-color: rgba(59, 130, 196, 0.45);
+  background: rgba(59, 130, 196, 0.08);
+}
+
+.archive-arxiv-feedback.is-error {
+  border-color: rgba(166, 75, 59, 0.45);
+  background: rgba(166, 75, 59, 0.08);
+}
+
 @media (max-width: 1000px) {
   .archive-reader-sidebar {
     width: 220px;
@@ -1095,5 +1240,9 @@ input:focus-visible {
     width: 32px;
     height: 32px;
     padding: 0;
+  }
+
+  .archive-settings-folder-row {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { FolderOpen, X } from 'lucide-react';
 import type { OpenFileLocationMode, ReaderSettings } from '../../types/settings';
 
 interface SettingsModalProps {
@@ -7,6 +7,7 @@ interface SettingsModalProps {
   settings: ReaderSettings;
   onClose: () => void;
   onChangeOpenFileLocation: (mode: OpenFileLocationMode) => void;
+  onChangeArxivDownloadFolder: (folder: string | null) => void;
 }
 
 interface LocationOption {
@@ -33,7 +34,25 @@ export function SettingsModal({
   settings,
   onClose,
   onChangeOpenFileLocation,
+  onChangeArxivDownloadFolder,
 }: SettingsModalProps) {
+  const handleBrowseArxivFolder = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select default folder for arXiv downloads',
+      });
+
+      if (selected && typeof selected === 'string') {
+        onChangeArxivDownloadFolder(selected);
+      }
+    } catch (error) {
+      console.error('Failed to choose arXiv download folder:', error);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -108,6 +127,42 @@ export function SettingsModal({
               })}
             </div>
           </section>
+
+          <section className="archive-settings-section archive-settings-section-divider">
+            <h3 className="archive-settings-section-title">arXiv 默认下载目录</h3>
+            <p className="archive-settings-section-desc">
+              通过 arXiv 链接导入时，PDF 与 metadata.json 会保存到这个目录。
+            </p>
+
+            <div className="archive-settings-folder-row">
+              <div
+                className="archive-settings-folder-display"
+                title={settings.arxivDownloadFolder ?? '未设置默认目录'}
+              >
+                <FolderOpen className="w-4 h-4 shrink-0 text-black/45" />
+                <span className={settings.arxivDownloadFolder ? '' : 'archive-settings-folder-placeholder'}>
+                  {settings.arxivDownloadFolder ?? '未设置默认目录'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleBrowseArxivFolder}
+                className="archive-action-btn archive-action-btn-primary"
+              >
+                Browse
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeArxivDownloadFolder(null)}
+                className="archive-action-btn"
+                disabled={!settings.arxivDownloadFolder}
+              >
+                Clear
+              </button>
+            </div>
+          </section>
         </div>
 
         <footer className="archive-settings-footer">
@@ -119,4 +174,3 @@ export function SettingsModal({
     </div>
   );
 }
-

@@ -5,12 +5,15 @@ import { ImportModal } from './ImportModal';
 import { ImportProgress } from './ImportProgress';
 import { ImportResult } from './ImportResult';
 import type { LibraryItem, ImportResult as ImportResultType, ImportProgress as ImportProgressType, ScannedFile } from '../../types/library';
+import type { ArxivImportOutcome } from '../../types/arxiv';
 
 interface LibraryViewProps {
   onOpenRecentFile: (path: string) => void;
   onOpenFile?: (file: File | string) => void;
   items: LibraryItem[];
   onImportFiles: (files: ScannedFile[]) => Promise<ImportResultType>;
+  onImportFromArxiv: (linkOrId: string) => Promise<ArxivImportOutcome>;
+  arxivDownloadFolder: string | null;
   onToggleFavorite: (itemId: string) => void;
   onRemoveItem: (itemId: string) => void;
   onRenameItem: (itemId: string, newName: string) => Promise<{ success: boolean; error?: string }>;
@@ -24,6 +27,8 @@ export function LibraryView({
   onOpenFile,
   items,
   onImportFiles,
+  onImportFromArxiv,
+  arxivDownloadFolder,
   onToggleFavorite,
   onRemoveItem,
   onRenameItem,
@@ -250,6 +255,8 @@ export function LibraryView({
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImport={handleImport}
+        onImportFromArxiv={onImportFromArxiv}
+        arxivDownloadFolder={arxivDownloadFolder}
         isImporting={isImporting}
       />
 
