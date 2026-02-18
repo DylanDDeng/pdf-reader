@@ -3,6 +3,7 @@ import { useTheme } from '../../hooks/useTheme';
 
 interface SidebarProps {
   onImportFolder?: () => void;
+  onOpenSettings?: () => void;
   activeView: 'library' | 'reader';
   onViewChange: (view: 'library' | 'reader') => void;
   isCollapsed?: boolean;
@@ -11,6 +12,7 @@ interface SidebarProps {
 
 export function Sidebar({ 
   onImportFolder, 
+  onOpenSettings,
   activeView, 
   onViewChange,
   isCollapsed = false,
@@ -102,6 +104,7 @@ export function Sidebar({
             </button>
 
             <button
+              onClick={onOpenSettings}
               className={`w-full rounded-xl transition-colors hover:bg-black/5 ${
                 isCollapsed ? 'h-10 grid place-items-center' : 'px-3 py-2 flex items-center gap-2'
               }`}

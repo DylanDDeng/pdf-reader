@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { getDocumentKey } from '../utils/documentKey';
 
 export interface Tab {
   id: string;
@@ -9,6 +10,10 @@ export interface Tab {
   scale: number;
   // 用于恢复滚动位置等
   scrollPosition?: number;
+}
+
+interface OpenFileOptions {
+  initialPage?: number;
 }
 
 export function useTabs() {
@@ -30,18 +35,10 @@ export function useTabs() {
     return file.name;
   }, []);
 
-  const getAnnotationKey = useCallback((file: File | string): string => {
-    if (typeof file === 'string') {
-      return `path:${file}`;
-    }
-
-    return `file:${file.name}:${file.size}:${file.lastModified}`;
-  }, []);
-
   // 打开新文件（添加标签页）
-  const openFile = useCallback((file: File | string) => {
+  const openFile = useCallback((file: File | string, options?: OpenFileOptions) => {
     const fileName = getFileName(file);
-    const annotationKey = getAnnotationKey(file);
+    const annotationKey = getDocumentKey(file);
     
     // 检查是否已打开
     const existingTab = tabs.find(t => {
@@ -60,20 +57,24 @@ export function useTabs() {
       return existingTab.id;
     }
 
+    const initialPage = Number.isFinite(options?.initialPage)
+      ? Math.max(1, Math.floor(options?.initialPage ?? 1))
+      : 1;
+
     // 创建新标签页
     const newTab: Tab = {
       id: generateTabId(),
       file,
       fileName,
       annotationKey,
-      currentPage: 1,
+      currentPage: initialPage,
       scale: 1.0,
     };
 
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
     return newTab.id;
-  }, [tabs, generateTabId, getFileName, getAnnotationKey]);
+  }, [tabs, generateTabId, getFileName]);
 
   // 关闭标签页
   const closeTab = useCallback((tabId: string) => {
