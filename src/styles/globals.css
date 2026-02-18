@@ -245,6 +245,49 @@ input:focus-visible {
   background: rgba(255, 255, 255, 0.7);
 }
 
+.archive-action-btn {
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--archive-ink-black);
+  font-family: var(--archive-font-main);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.archive-action-btn:hover {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.archive-action-btn:disabled {
+  background: rgba(255, 255, 255, 0.58);
+  color: rgba(26, 26, 26, 0.45);
+  border-color: rgba(0, 0, 0, 0.1);
+  cursor: not-allowed;
+}
+
+.archive-action-btn-primary {
+  background: var(--archive-ink-black);
+  border-color: var(--archive-ink-black);
+  color: #fff;
+}
+
+.archive-action-btn-primary:hover {
+  background: #0f0f0f;
+  border-color: #0f0f0f;
+}
+
+.archive-action-btn-primary:disabled {
+  background: rgba(26, 26, 26, 0.42);
+  border-color: rgba(26, 26, 26, 0.42);
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .archive-content-scroll {
   flex: 1;
   overflow-y: auto;
