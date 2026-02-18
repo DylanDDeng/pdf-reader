@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { X, FileText } from 'lucide-react';
 import { ReaderToolbar } from './ReaderToolbar';
 import { ReaderSidebar } from './ReaderSidebar';
-import { PdfViewer } from './PdfViewer';
+import { PdfViewer, type AnnotationClickContext } from './PdfViewer';
 import { AnnotationPanel } from './AnnotationPanel';
 import type { OutlineItem } from '../../utils/pdf';
 import type { Tab } from '../../hooks/useTabs';
@@ -24,6 +24,11 @@ const SCALE_STEP = 0.25;
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
 
+interface FocusGuideState {
+  source: { x: number; y: number };
+  target: { x: number; y: number };
+}
+
 export function Viewer({
   tabs,
   activeTabId,
@@ -37,6 +42,16 @@ export function Viewer({
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [eraseMode, setEraseMode] = useState(false);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [focusOrigin, setFocusOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [focusGuide, setFocusGuide] = useState<FocusGuideState | null>(null);
+  const [panelAttention, setPanelAttention] = useState(false);
+  const [attentionAnnotationId, setAttentionAnnotationId] = useState<string | null>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 1920, height: 1080 });
+
+  const annotationPanelRef = useRef<HTMLDivElement | null>(null);
+  const focusGuideSeqRef = useRef(0);
+  const focusGuideRafRef = useRef<number | null>(null);
+  const focusGuideTimerRefs = useRef<number[]>([]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -50,11 +65,139 @@ export function Viewer({
     getAllAnnotations,
   } = useAnnotations(fileId);
 
+  const clearFocusGuideAnimation = useCallback(() => {
+    if (focusGuideRafRef.current !== null) {
+      cancelAnimationFrame(focusGuideRafRef.current);
+      focusGuideRafRef.current = null;
+    }
+    focusGuideTimerRefs.current.forEach((timerId) => {
+      clearTimeout(timerId);
+    });
+    focusGuideTimerRefs.current = [];
+    setFocusOrigin(null);
+    setFocusGuide(null);
+    setPanelAttention(false);
+    setAttentionAnnotationId(null);
+  }, []);
+
+  const triggerAnnotationFocusGuide = useCallback((annotationId: string, context?: AnnotationClickContext) => {
+    if (!context) {
+      return;
+    }
+
+    clearFocusGuideAnimation();
+    const seq = ++focusGuideSeqRef.current;
+    const source = { x: context.clientX, y: context.clientY };
+    setFocusOrigin(source);
+    setPanelAttention(true);
+    setAttentionAnnotationId(annotationId);
+
+    const hideOriginTimer = window.setTimeout(() => {
+      if (focusGuideSeqRef.current !== seq) {
+        return;
+      }
+      setFocusOrigin(null);
+    }, 520);
+    focusGuideTimerRefs.current.push(hideOriginTimer);
+
+    let attempts = 0;
+    const maxAttempts = 70;
+
+    const resolveTarget = () => {
+      if (focusGuideSeqRef.current !== seq) {
+        return;
+      }
+
+      const card = annotationPanelRef.current?.querySelector<HTMLDivElement>(
+        `[data-annotation-id="${annotationId}"]`
+      );
+
+      if (!card) {
+        attempts += 1;
+        if (attempts <= maxAttempts) {
+          focusGuideRafRef.current = requestAnimationFrame(resolveTarget);
+        }
+        return;
+      }
+
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      const trackingStart = performance.now();
+      const trackingDuration = 760;
+
+      const trackTarget = () => {
+        if (focusGuideSeqRef.current !== seq) {
+          return;
+        }
+
+        const rect = card.getBoundingClientRect();
+        setFocusGuide({
+          source,
+          target: {
+            x: rect.left + Math.min(36, Math.max(20, rect.width * 0.18)),
+            y: rect.top + rect.height / 2,
+          },
+        });
+
+        if (performance.now() - trackingStart < trackingDuration) {
+          focusGuideRafRef.current = requestAnimationFrame(trackTarget);
+        }
+      };
+
+      trackTarget();
+    };
+
+    focusGuideRafRef.current = requestAnimationFrame(resolveTarget);
+
+    const finishTimer = window.setTimeout(() => {
+      if (focusGuideSeqRef.current !== seq) {
+        return;
+      }
+      setFocusOrigin(null);
+      setFocusGuide(null);
+      setPanelAttention(false);
+      setAttentionAnnotationId(null);
+    }, 1750);
+    focusGuideTimerRefs.current.push(finishTimer);
+  }, [clearFocusGuideAnimation]);
+
+  const focusGuidePath = useMemo(() => {
+    if (!focusGuide) {
+      return '';
+    }
+    const { source, target } = focusGuide;
+    const deltaX = target.x - source.x;
+    const curveSpan = Math.max(120, Math.abs(deltaX) * 0.34);
+    const c1x = source.x + curveSpan;
+    const c2x = target.x - curveSpan;
+    const c1y = source.y;
+    const c2y = target.y;
+    return `M ${source.x} ${source.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${target.x} ${target.y}`;
+  }, [focusGuide]);
+
   useEffect(() => {
+    clearFocusGuideAnimation();
     setSelectedAnnotationId(null);
     setShowAnnotations(false);
     setEraseMode(false);
-  }, [activeTabId]);
+  }, [activeTabId, clearFocusGuideAnimation]);
+
+  useEffect(() => {
+    const updateViewportSize = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    updateViewportSize();
+    window.addEventListener('resize', updateViewportSize);
+    return () => {
+      window.removeEventListener('resize', updateViewportSize);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearFocusGuideAnimation();
+    };
+  }, [clearFocusGuideAnimation]);
 
   const handleDocumentLoad = useCallback((pages: number, pdfOutline: OutlineItem[]) => {
     setTotalPages(pages);
@@ -157,7 +300,7 @@ export function Viewer({
     handlePageChange(page);
   }, [handlePageChange]);
 
-  const handleHighlightClick = useCallback((annotation: Annotation) => {
+  const handleHighlightClick = useCallback((annotation: Annotation, context?: AnnotationClickContext) => {
     if (eraseMode) {
       deleteAnnotation(annotation.id);
       if (selectedAnnotationId === annotation.id) {
@@ -168,7 +311,8 @@ export function Viewer({
     setShowAnnotations(true);
     setSelectedAnnotationId(annotation.id);
     handlePageChange(annotation.page);
-  }, [deleteAnnotation, eraseMode, handlePageChange, selectedAnnotationId]);
+    triggerAnnotationFocusGuide(annotation.id, context);
+  }, [deleteAnnotation, eraseMode, handlePageChange, selectedAnnotationId, triggerAnnotationFocusGuide]);
 
   const handleDeleteAnnotation = useCallback((annotationId: string) => {
     deleteAnnotation(annotationId);
@@ -312,7 +456,12 @@ export function Viewer({
             </div>
 
             {showAnnotations && (
-              <div className="w-80 bg-white/85 border-l border-black/10 border-dashed flex flex-col backdrop-blur-[1px]">
+              <div
+                ref={annotationPanelRef}
+                className={`w-80 bg-white/85 border-l border-black/10 border-dashed flex flex-col backdrop-blur-[1px] ${
+                  panelAttention ? 'archive-annotation-panel-guided' : ''
+                }`}
+              >
                 <div className="px-4 py-3 border-b border-black/10 border-dashed">
                   <h3 className="font-medium text-[var(--archive-ink-black)] uppercase tracking-[0.06em] text-xs">批注</h3>
                 </div>
@@ -323,11 +472,40 @@ export function Viewer({
                   onDelete={handleDeleteAnnotation}
                   onUpdateComment={updateComment}
                   selectedAnnotationId={selectedAnnotationId}
+                  attentionAnnotationId={attentionAnnotationId}
                   onSelectAnnotation={setSelectedAnnotationId}
                 />
               </div>
             )}
           </div>
+
+          {(focusGuide || focusOrigin) && (
+            <div className="archive-focus-overlay" aria-hidden>
+              {focusOrigin && (
+                <span
+                  className="archive-focus-origin-pulse"
+                  style={{ left: focusOrigin.x, top: focusOrigin.y }}
+                />
+              )}
+              <svg
+                className="archive-focus-svg"
+                viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`}
+                preserveAspectRatio="none"
+              >
+                {focusGuide && focusGuidePath && (
+                  <>
+                    <path d={focusGuidePath} pathLength={1} className="archive-focus-bridge-line" />
+                    <circle
+                      className="archive-focus-target-dot"
+                      cx={focusGuide.target.x}
+                      cy={focusGuide.target.y}
+                      r={7}
+                    />
+                  </>
+                )}
+              </svg>
+            </div>
+          )}
         </>
       )}
     </div>

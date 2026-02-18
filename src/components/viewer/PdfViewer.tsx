@@ -31,7 +31,7 @@ interface PdfViewerProps {
     color: HighlightColor,
     rects: Array<{ left: number; top: number; width: number; height: number }>
   ) => void;
-  onHighlightClick?: (annotation: Annotation) => void;
+  onHighlightClick?: (annotation: Annotation, context?: AnnotationClickContext) => void;
   interactiveHighlights?: boolean;
   deleteMode?: boolean;
 }
@@ -62,6 +62,11 @@ interface LayerPointerInfo {
   pageNumber: number;
   x: number;
   y: number;
+}
+
+export interface AnnotationClickContext {
+  clientX: number;
+  clientY: number;
 }
 
 const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 };
@@ -1006,7 +1011,11 @@ export function PdfViewer({
       }
 
       event.stopPropagation();
-      onHighlightClick(annotation);
+      const sourceClient = hasPointerPoint
+        ? { clientX: layerRect.left + hitX, clientY: layerRect.top + hitY }
+        : { clientX: event.clientX, clientY: event.clientY };
+
+      onHighlightClick(annotation, sourceClient);
     };
 
     const handleSelectionChange = () => {

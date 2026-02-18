@@ -10,6 +10,7 @@ interface AnnotationPanelProps {
   onDelete: (id: string) => void;
   onUpdateComment: (id: string, comment: string) => void;
   selectedAnnotationId?: string | null;
+  attentionAnnotationId?: string | null;
   onSelectAnnotation?: (annotationId: string) => void;
 }
 
@@ -20,6 +21,7 @@ export function AnnotationPanel({
   onDelete,
   onUpdateComment,
   selectedAnnotationId,
+  attentionAnnotationId,
   onSelectAnnotation,
 }: AnnotationPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -78,6 +80,7 @@ export function AnnotationPanel({
           const color = HIGHLIGHT_COLORS[ann.color];
           const isEditing = editingId === ann.id;
           const isSelected = selectedAnnotationId === ann.id;
+          const isAttention = attentionAnnotationId === ann.id;
           const typeLabel = ann.type === 'underline' ? '下划线' : '高亮';
 
           return (
@@ -90,7 +93,7 @@ export function AnnotationPanel({
                   : currentPage === ann.page
                   ? 'bg-white border-slate-200 shadow-sm'
                   : 'bg-slate-50 border-transparent hover:bg-white hover:border-slate-200'
-              }`}
+              } ${isAttention ? 'archive-annotation-card-attention' : ''}`}
               onClick={() => {
                 onSelectAnnotation?.(ann.id);
                 onPageChange(ann.page);
