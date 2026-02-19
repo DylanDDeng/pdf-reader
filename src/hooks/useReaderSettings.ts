@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { OpenFileLocationMode, ReaderSettings } from '../types/settings';
+import type { DefaultZoomMode, OpenFileLocationMode, ReaderSettings } from '../types/settings';
 
 const STORAGE_KEY = 'pdf-reader-settings';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   openFileLocation: 'last_read_page',
+  defaultZoomMode: 'fit_width',
   arxivDownloadFolder: null,
 };
 
 function isOpenFileLocationMode(value: unknown): value is OpenFileLocationMode {
   return value === 'last_read_page' || value === 'first_page';
+}
+
+function isDefaultZoomMode(value: unknown): value is DefaultZoomMode {
+  return value === 'fit_width' || value === 'fixed_100' || value === 'remember_last';
 }
 
 function loadSettings(): ReaderSettings {
@@ -23,9 +28,13 @@ function loadSettings(): ReaderSettings {
     const openFileLocation = isOpenFileLocationMode(parsed.openFileLocation)
       ? parsed.openFileLocation
       : DEFAULT_SETTINGS.openFileLocation;
+    const defaultZoomMode = isDefaultZoomMode(parsed.defaultZoomMode)
+      ? parsed.defaultZoomMode
+      : DEFAULT_SETTINGS.defaultZoomMode;
 
     return {
       openFileLocation,
+      defaultZoomMode,
       arxivDownloadFolder:
         typeof parsed.arxivDownloadFolder === 'string' && parsed.arxivDownloadFolder.trim().length > 0
           ? parsed.arxivDownloadFolder
@@ -57,6 +66,15 @@ export function useReaderSettings() {
     });
   }, []);
 
+  const setDefaultZoomMode = useCallback((defaultZoomMode: DefaultZoomMode) => {
+    setSettings((prev) => {
+      if (prev.defaultZoomMode === defaultZoomMode) {
+        return prev;
+      }
+      return { ...prev, defaultZoomMode };
+    });
+  }, []);
+
   const setArxivDownloadFolder = useCallback((folder: string | null) => {
     const normalized = folder && folder.trim().length > 0 ? folder.trim() : null;
     setSettings((prev) => {
@@ -71,6 +89,7 @@ export function useReaderSettings() {
     settings,
     setSettings,
     setOpenFileLocation,
+    setDefaultZoomMode,
     setArxivDownloadFolder,
   };
 }

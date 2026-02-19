@@ -1,17 +1,24 @@
 import { useEffect } from 'react';
 import { FolderOpen, X } from 'lucide-react';
-import type { OpenFileLocationMode, ReaderSettings } from '../../types/settings';
+import type { DefaultZoomMode, OpenFileLocationMode, ReaderSettings } from '../../types/settings';
 
 interface SettingsModalProps {
   isOpen: boolean;
   settings: ReaderSettings;
   onClose: () => void;
   onChangeOpenFileLocation: (mode: OpenFileLocationMode) => void;
+  onChangeDefaultZoomMode: (mode: DefaultZoomMode) => void;
   onChangeArxivDownloadFolder: (folder: string | null) => void;
 }
 
 interface LocationOption {
   mode: OpenFileLocationMode;
+  title: string;
+  description: string;
+}
+
+interface ZoomOption {
+  mode: DefaultZoomMode;
   title: string;
   description: string;
 }
@@ -29,11 +36,30 @@ const OPEN_FILE_LOCATION_OPTIONS: LocationOption[] = [
   },
 ];
 
+const DEFAULT_ZOOM_OPTIONS: ZoomOption[] = [
+  {
+    mode: 'fit_width',
+    title: '适应宽度',
+    description: '自动贴合阅读区域宽度，窗口尺寸变化时会自动重算。',
+  },
+  {
+    mode: 'fixed_100',
+    title: '100%',
+    description: '始终以 100% 缩放打开文档。',
+  },
+  {
+    mode: 'remember_last',
+    title: '记住上次缩放',
+    description: '按文档记住你上次的自定义缩放比例。',
+  },
+];
+
 export function SettingsModal({
   isOpen,
   settings,
   onClose,
   onChangeOpenFileLocation,
+  onChangeDefaultZoomMode,
   onChangeArxivDownloadFolder,
 }: SettingsModalProps) {
   const handleBrowseArxivFolder = async () => {
@@ -113,6 +139,35 @@ export function SettingsModal({
                     key={option.mode}
                     type="button"
                     onClick={() => onChangeOpenFileLocation(option.mode)}
+                    className={`archive-settings-option ${isActive ? 'is-active' : ''}`}
+                  >
+                    <span className="archive-settings-radio" aria-hidden>
+                      <span className="archive-settings-radio-dot" />
+                    </span>
+                    <span className="archive-settings-option-copy">
+                      <span className="archive-settings-option-title">{option.title}</span>
+                      <span className="archive-settings-option-desc">{option.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="archive-settings-section archive-settings-section-divider">
+            <h3 className="archive-settings-section-title">默认缩放</h3>
+            <p className="archive-settings-section-desc">
+              控制新打开文档时的初始缩放策略。
+            </p>
+
+            <div className="archive-settings-options">
+              {DEFAULT_ZOOM_OPTIONS.map((option) => {
+                const isActive = settings.defaultZoomMode === option.mode;
+                return (
+                  <button
+                    key={option.mode}
+                    type="button"
+                    onClick={() => onChangeDefaultZoomMode(option.mode)}
                     className={`archive-settings-option ${isActive ? 'is-active' : ''}`}
                   >
                     <span className="archive-settings-radio" aria-hidden>

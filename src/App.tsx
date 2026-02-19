@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { LibraryView } from './components/library/LibraryView';
 import { Viewer } from './components/viewer/Viewer';
@@ -7,9 +7,11 @@ import { useLibrary } from './hooks/useLibrary';
 import { useTabs, type Tab } from './hooks/useTabs';
 import { useReaderSettings } from './hooks/useReaderSettings';
 import { useReadingProgress } from './hooks/useReadingProgress';
+import { useZoomMemory } from './hooks/useZoomMemory';
 import { getDocumentKey } from './utils/documentKey';
 import type { ScannedFile, ImportResult as ImportResultType } from './types/library';
 import type { ArxivImportOutcome } from './types/arxiv';
+import type { DefaultZoomMode } from './types/settings';
 
 function App() {
   const [activeView, setActiveView] = useState<'library' | 'reader'>('library');
@@ -25,8 +27,14 @@ function App() {
     switchTab,
     updateTab,
   } = useTabs();
-  const { settings, setOpenFileLocation, setArxivDownloadFolder } = useReaderSettings();
+  const { settings, setOpenFileLocation, setDefaultZoomMode, setArxivDownloadFolder } = useReaderSettings();
   const { getLastPage, setLastPage } = useReadingProgress();
+  const { getLastScale, setLastScale } = useZoomMemory();
+
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === activeTabId) ?? null,
+    [activeTabId, tabs]
+  );
 
   // Use the library hook for managing PDF library
   const {
@@ -51,6 +59,29 @@ function App() {
     return lastPage ?? 1;
   }, [getLastPage, settings.openFileLocation]);
 
+  const resolveInitialZoom = useCallback((file: File | string) => {
+    if (settings.defaultZoomMode === 'fit_width') {
+      return {
+        initialScale: 1,
+        initialZoomMode: 'fit_width' as const,
+      };
+    }
+
+    if (settings.defaultZoomMode === 'fixed_100') {
+      return {
+        initialScale: 1,
+        initialZoomMode: 'custom' as const,
+      };
+    }
+
+    const documentKey = getDocumentKey(file);
+    const rememberedScale = getLastScale(documentKey) ?? 1;
+    return {
+      initialScale: rememberedScale,
+      initialZoomMode: 'custom' as const,
+    };
+  }, [getLastScale, settings.defaultZoomMode]);
+
   // Handle opening a file from the library
   const handleOpenRecentFile = useCallback(
     (path: string) => {
@@ -63,17 +94,21 @@ function App() {
       }
       
       // 打开文件到新标签页
-      openFile(path, { initialPage: resolveInitialPage(path) });
+      const initialPage = resolveInitialPage(path);
+      const { initialScale, initialZoomMode } = resolveInitialZoom(path);
+      openFile(path, { initialPage, initialScale, initialZoomMode });
       setActiveView('reader');
     },
-    [libraryItems, updateItem, openFile, resolveInitialPage]
+    [libraryItems, openFile, resolveInitialPage, resolveInitialZoom, updateItem]
   );
 
   // 从 LibraryView 拖拽/选择打开文件
   const handleOpenFile = useCallback((file: File | string) => {
-    openFile(file, { initialPage: resolveInitialPage(file) });
+    const initialPage = resolveInitialPage(file);
+    const { initialScale, initialZoomMode } = resolveInitialZoom(file);
+    openFile(file, { initialPage, initialScale, initialZoomMode });
     setActiveView('reader');
-  }, [openFile, resolveInitialPage]);
+  }, [openFile, resolveInitialPage, resolveInitialZoom]);
 
   // 关闭所有标签页时返回图书馆
   const handleTabClose = useCallback((tabId: string) => {
@@ -111,19 +146,41 @@ function App() {
     tabId: string,
     updates: Partial<Omit<Tab, 'id' | 'file' | 'fileName' | 'annotationKey'>>
   ) => {
+    const targetTab = tabs.find((tab) => tab.id === tabId);
     updateTab(tabId, updates);
 
-    if (updates.currentPage === undefined || !Number.isFinite(updates.currentPage) || updates.currentPage < 1) {
+    if (targetTab && updates.currentPage !== undefined && Number.isFinite(updates.currentPage) && updates.currentPage >= 1) {
+      setLastPage(targetTab.annotationKey, updates.currentPage);
+    }
+
+    if (targetTab && updates.scale !== undefined && Number.isFinite(updates.scale) && updates.scale > 0) {
+      const nextZoomMode = updates.zoomMode ?? targetTab.zoomMode;
+      if (nextZoomMode === 'custom') {
+        setLastScale(targetTab.annotationKey, updates.scale);
+      }
+    }
+  }, [setLastPage, setLastScale, tabs, updateTab]);
+
+  const handleChangeDefaultZoomMode = useCallback((mode: DefaultZoomMode) => {
+    setDefaultZoomMode(mode);
+
+    if (!activeTab) {
       return;
     }
 
-    const targetTab = tabs.find((tab) => tab.id === tabId);
-    if (!targetTab) {
+    if (mode === 'fit_width') {
+      handleTabUpdate(activeTab.id, { zoomMode: 'fit_width' });
       return;
     }
 
-    setLastPage(targetTab.annotationKey, updates.currentPage);
-  }, [setLastPage, tabs, updateTab]);
+    if (mode === 'fixed_100') {
+      handleTabUpdate(activeTab.id, { zoomMode: 'custom', scale: 1 });
+      return;
+    }
+
+    const rememberedScale = getLastScale(activeTab.annotationKey) ?? 1;
+    handleTabUpdate(activeTab.id, { zoomMode: 'custom', scale: rememberedScale });
+  }, [activeTab, getLastScale, handleTabUpdate, setDefaultZoomMode]);
 
   return (
     <div className="flex h-screen overflow-hidden archive-shell-bg">
@@ -168,6 +225,7 @@ function App() {
         settings={settings}
         onClose={() => setIsSettingsOpen(false)}
         onChangeOpenFileLocation={setOpenFileLocation}
+        onChangeDefaultZoomMode={handleChangeDefaultZoomMode}
         onChangeArxivDownloadFolder={setArxivDownloadFolder}
       />
     </div>

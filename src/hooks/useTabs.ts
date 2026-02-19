@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
 import { getDocumentKey } from '../utils/documentKey';
 
+export type TabZoomMode = 'fit_width' | 'custom';
+
 export interface Tab {
   id: string;
   file: File | string;
@@ -8,12 +10,15 @@ export interface Tab {
   annotationKey: string;
   currentPage: number;
   scale: number;
+  zoomMode: TabZoomMode;
   // 用于恢复滚动位置等
   scrollPosition?: number;
 }
 
 interface OpenFileOptions {
   initialPage?: number;
+  initialScale?: number;
+  initialZoomMode?: TabZoomMode;
 }
 
 export function useTabs() {
@@ -60,6 +65,10 @@ export function useTabs() {
     const initialPage = Number.isFinite(options?.initialPage)
       ? Math.max(1, Math.floor(options?.initialPage ?? 1))
       : 1;
+    const initialScale = Number.isFinite(options?.initialScale)
+      ? Math.max(0.25, Math.min(options?.initialScale ?? 1, 4))
+      : 1;
+    const initialZoomMode = options?.initialZoomMode === 'fit_width' ? 'fit_width' : 'custom';
 
     // 创建新标签页
     const newTab: Tab = {
@@ -68,7 +77,8 @@ export function useTabs() {
       fileName,
       annotationKey,
       currentPage: initialPage,
-      scale: 1.0,
+      scale: initialScale,
+      zoomMode: initialZoomMode,
     };
 
     setTabs(prev => [...prev, newTab]);

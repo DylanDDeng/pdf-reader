@@ -248,8 +248,13 @@ export function Viewer({
     }
 
     const nextScale = Math.min(activeTab.scale + SCALE_STEP, MAX_SCALE);
+    if (activeTab.zoomMode === 'fit_width') {
+      onTabUpdate(activeTab.id, { zoomMode: 'custom', scale: nextScale });
+      return;
+    }
+
     if (nextScale !== activeTab.scale) {
-      onTabUpdate(activeTab.id, { scale: nextScale });
+      onTabUpdate(activeTab.id, { zoomMode: 'custom', scale: nextScale });
     }
   }, [activeTab, onTabUpdate]);
 
@@ -259,8 +264,13 @@ export function Viewer({
     }
 
     const nextScale = Math.max(activeTab.scale - SCALE_STEP, MIN_SCALE);
+    if (activeTab.zoomMode === 'fit_width') {
+      onTabUpdate(activeTab.id, { zoomMode: 'custom', scale: nextScale });
+      return;
+    }
+
     if (nextScale !== activeTab.scale) {
-      onTabUpdate(activeTab.id, { scale: nextScale });
+      onTabUpdate(activeTab.id, { zoomMode: 'custom', scale: nextScale });
     }
   }, [activeTab, onTabUpdate]);
 
@@ -269,9 +279,20 @@ export function Viewer({
       return;
     }
 
-    if (activeTab.scale !== 1) {
-      onTabUpdate(activeTab.id, { scale: 1 });
+    if (activeTab.zoomMode !== 'custom' || activeTab.scale !== 1) {
+      onTabUpdate(activeTab.id, { zoomMode: 'custom', scale: 1 });
     }
+  }, [activeTab, onTabUpdate]);
+
+  const handleFitWidthScaleCalculated = useCallback((nextScale: number) => {
+    if (!activeTab || activeTab.zoomMode !== 'fit_width') {
+      return;
+    }
+    if (Math.abs(nextScale - activeTab.scale) <= 0.01) {
+      return;
+    }
+
+    onTabUpdate(activeTab.id, { scale: nextScale });
   }, [activeTab, onTabUpdate]);
 
   const handleAddHighlight = useCallback((
@@ -444,6 +465,8 @@ export function Viewer({
                 file={activeTab.file}
                 currentPage={activeTab.currentPage}
                 scale={activeTab.scale}
+                fitWidthMode={activeTab.zoomMode === 'fit_width'}
+                onFitWidthScaleCalculated={handleFitWidthScaleCalculated}
                 annotations={annotations}
                 onDocumentLoad={handleDocumentLoad}
                 onPageChange={handlePageChange}

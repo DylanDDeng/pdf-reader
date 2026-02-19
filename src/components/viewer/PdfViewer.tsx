@@ -16,6 +16,8 @@ interface PdfViewerProps {
   file: File | string;
   currentPage: number;
   scale: number;
+  fitWidthMode?: boolean;
+  onFitWidthScaleCalculated?: (scale: number) => void;
   annotations: Annotation[];
   onDocumentLoad: (totalPages: number, outline: OutlineItem[]) => void;
   onPageChange?: (page: number) => void;
@@ -73,11 +75,16 @@ const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 };
 const SCROLL_SYNC_DELAY_MS = 420;
 const CANVAS_BUFFER_VIEWPORTS = 2.5;
 const TEXT_BUFFER_VIEWPORTS = 0.9;
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 4;
+const FIT_WIDTH_HORIZONTAL_PADDING = 80;
 
 export function PdfViewer({
   file,
   currentPage,
   scale,
+  fitWidthMode = false,
+  onFitWidthScaleCalculated,
   annotations,
   onDocumentLoad,
   onPageChange,
@@ -114,6 +121,7 @@ export function PdfViewer({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pageCount, setPageCount] = useState(0);
+  const [basePageWidth, setBasePageWidth] = useState<number | null>(null);
   const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({});
   const [renderedPages, setRenderedPages] = useState<Record<number, boolean>>({});
 
@@ -198,6 +206,7 @@ export function PdfViewer({
       setIsLoading(true);
       setError(null);
       setPageCount(0);
+      setBasePageWidth(null);
       pageRefsRef.current.clear();
       resetRenderCaches(true);
       resetSelectionState(true);
@@ -225,6 +234,12 @@ export function PdfViewer({
         }
 
         onDocumentLoadRef.current(doc.numPages, outline);
+        const firstPage = await doc.getPage(1);
+        if (!isMounted || loadSeq !== renderSeqRef.current) {
+          return;
+        }
+        const baseViewport = firstPage.getViewport({ scale: 1 });
+        setBasePageWidth(baseViewport.width);
         setPageCount(doc.numPages);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -265,6 +280,76 @@ export function PdfViewer({
       }
     };
   }, [file, resetRenderCaches, resetSelectionState]);
+
+  const calculateFitWidthScale = useCallback(() => {
+    if (!fitWidthMode || !onFitWidthScaleCalculated) {
+      return;
+    }
+    if (!basePageWidth || basePageWidth <= 0) {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const availableWidth = container.clientWidth - FIT_WIDTH_HORIZONTAL_PADDING;
+    if (availableWidth <= 0) {
+      return;
+    }
+
+    const nextScale = Math.max(MIN_SCALE, Math.min(availableWidth / basePageWidth, MAX_SCALE));
+    if (Math.abs(nextScale - scale) <= 0.01) {
+      return;
+    }
+
+    onFitWidthScaleCalculated(nextScale);
+  }, [basePageWidth, fitWidthMode, onFitWidthScaleCalculated, scale]);
+
+  useEffect(() => {
+    if (!fitWidthMode) {
+      return;
+    }
+
+    calculateFitWidthScale();
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      let rafId: number | null = null;
+      const observer = new ResizeObserver(() => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+        }
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          calculateFitWidthScale();
+        });
+      });
+
+      observer.observe(container);
+
+      return () => {
+        observer.disconnect();
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+        }
+      };
+    }
+
+    const handleResize = () => {
+      calculateFitWidthScale();
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [calculateFitWidthScale, fitWidthMode]);
 
   const ensurePageCanvas = useCallback(async (pageNumber: number, expectedRenderSeq: number) => {
     if (expectedRenderSeq !== renderSeqRef.current) {
