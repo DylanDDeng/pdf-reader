@@ -2,10 +2,11 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import {
   loadPdfDocument,
-  renderPage,
+  startRenderPage,
   renderTextLayer,
   extractOutline,
   type OutlineItem,
+  type PdfCanvasRenderTask,
   type PdfTextLayerTask,
 } from '../../utils/pdf';
 import { HighlightLayer } from './HighlightLayer';
@@ -16,6 +17,7 @@ interface PdfViewerProps {
   file: File | string;
   currentPage: number;
   scale: number;
+  isActive?: boolean;
   fitWidthMode?: boolean;
   onFitWidthScaleCalculated?: (scale: number) => void;
   annotations: Annotation[];
@@ -78,11 +80,33 @@ const TEXT_BUFFER_VIEWPORTS = 0.9;
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
 const FIT_WIDTH_HORIZONTAL_PADDING = 80;
+const RENDER_RETRY_DELAY_MS = 90;
+const RENDER_RETRY_MAX_DELAY_MS = 720;
+const RENDER_RETRY_MAX_ATTEMPTS = 5;
+
+function clampPage(page: number, totalPages: number): number {
+  const normalized = Number.isFinite(page) ? Math.floor(page) : 1;
+  if (totalPages <= 0) {
+    return Math.max(1, normalized);
+  }
+  return Math.max(1, Math.min(normalized, totalPages));
+}
+
+function isRenderCancellationError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes('cancel') ||
+    message.includes('aborted') ||
+    message.includes('rendering cancelled') ||
+    message.includes('textlayer task cancelled')
+  );
+}
 
 export function PdfViewer({
   file,
   currentPage,
   scale,
+  isActive = true,
   fitWidthMode = false,
   onFitWidthScaleCalculated,
   annotations,
@@ -101,6 +125,7 @@ export function PdfViewer({
   const textLayerTasksRef = useRef<Map<number, PdfTextLayerTask>>(new Map());
   const renderSeqRef = useRef(0);
   const scrollRafRef = useRef<number | null>(null);
+  const prevIsActiveRef = useRef(isActive);
   const currentPageRef = useRef(currentPage);
   const isPointerSelectingRef = useRef(false);
   const isProgrammaticScrollRef = useRef(false);
@@ -112,11 +137,14 @@ export function PdfViewer({
   const pendingReadyPageRef = useRef<number | null>(null);
   const lastSelectionKeyRef = useRef('');
   const canvasRenderLocksRef = useRef<Map<number, Promise<void>>>(new Map());
+  const canvasRenderTasksRef = useRef<Map<number, PdfCanvasRenderTask>>(new Map());
   const textRenderLocksRef = useRef<Map<number, Promise<void>>>(new Map());
   const renderedCanvasScaleRef = useRef<Map<number, number>>(new Map());
   const renderedTextScaleRef = useRef<Map<number, number>>(new Map());
   const scheduleVisiblePageRenderRef = useRef<() => void>(() => {});
   const lastLayerPointerRef = useRef<LayerPointerInfo | null>(null);
+  const pendingRenderRetryRef = useRef<Map<string, number>>(new Map());
+  const renderRetryAttemptsRef = useRef<Map<string, number>>(new Map());
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -138,6 +166,13 @@ export function PdfViewer({
     textLayerTasksRef.current.clear();
   }, []);
 
+  const cancelAllCanvasRenderTasks = useCallback(() => {
+    canvasRenderTasksRef.current.forEach((task) => {
+      task.cancel();
+    });
+    canvasRenderTasksRef.current.clear();
+  }, []);
+
   const resetSelectionState = useCallback((clearBrowserSelection: boolean = false) => {
     if (clearBrowserSelection) {
       window.getSelection()?.removeAllRanges();
@@ -151,6 +186,7 @@ export function PdfViewer({
   }, []);
 
   const resetRenderCaches = useCallback((clearSizes: boolean = false) => {
+    cancelAllCanvasRenderTasks();
     canvasRenderLocksRef.current.clear();
     textRenderLocksRef.current.clear();
     renderedCanvasScaleRef.current.clear();
@@ -160,7 +196,7 @@ export function PdfViewer({
     if (clearSizes) {
       setPageSizes({});
     }
-  }, [destroyTextLayerTasks]);
+  }, [cancelAllCanvasRenderTasks, destroyTextLayerTasks]);
 
   const setPageRefs = useCallback((pageNumber: number, partial: Partial<PageRefs>) => {
     const prev = pageRefsRef.current.get(pageNumber) ?? {
@@ -170,6 +206,63 @@ export function PdfViewer({
     };
     pageRefsRef.current.set(pageNumber, { ...prev, ...partial });
   }, []);
+
+  const clearAllRenderRetryTimers = useCallback(() => {
+    pendingRenderRetryRef.current.forEach((timerId) => {
+      clearTimeout(timerId);
+    });
+    pendingRenderRetryRef.current.clear();
+    renderRetryAttemptsRef.current.clear();
+  }, []);
+
+  const clearRenderRetry = useCallback((pageNumber: number, expectedRenderSeq: number) => {
+    if (!Number.isFinite(pageNumber) || pageNumber < 1) {
+      return;
+    }
+    const key = `${expectedRenderSeq}:${Math.floor(pageNumber)}`;
+    const timerId = pendingRenderRetryRef.current.get(key);
+    if (timerId !== undefined) {
+      clearTimeout(timerId);
+      pendingRenderRetryRef.current.delete(key);
+    }
+    renderRetryAttemptsRef.current.delete(key);
+  }, []);
+
+  const scheduleRenderRetry = useCallback((pageNumber: number, expectedRenderSeq: number) => {
+    if (expectedRenderSeq !== renderSeqRef.current || pageCount <= 0) {
+      return;
+    }
+    if (!Number.isFinite(pageNumber) || pageNumber < 1 || pageNumber > pageCount) {
+      return;
+    }
+
+    const key = `${expectedRenderSeq}:${Math.floor(pageNumber)}`;
+    if (pendingRenderRetryRef.current.has(key)) {
+      return;
+    }
+
+    const attempt = (renderRetryAttemptsRef.current.get(key) ?? 0) + 1;
+    if (attempt > RENDER_RETRY_MAX_ATTEMPTS) {
+      return;
+    }
+    renderRetryAttemptsRef.current.set(key, attempt);
+    const retryDelay = Math.min(RENDER_RETRY_DELAY_MS * (2 ** (attempt - 1)), RENDER_RETRY_MAX_DELAY_MS);
+
+    const timerId = window.setTimeout(() => {
+      if (pendingRenderRetryRef.current.get(key) !== timerId) {
+        return;
+      }
+      pendingRenderRetryRef.current.delete(key);
+
+      if (expectedRenderSeq !== renderSeqRef.current) {
+        return;
+      }
+
+      scheduleVisiblePageRenderRef.current();
+    }, retryDelay);
+
+    pendingRenderRetryRef.current.set(key, timerId);
+  }, [pageCount]);
 
   const waitForPageRefs = useCallback(async (
     pageNumber: number,
@@ -207,9 +300,11 @@ export function PdfViewer({
       setError(null);
       setPageCount(0);
       setBasePageWidth(null);
+      currentPageRef.current = Math.max(1, Math.floor(currentPage || 1));
       pageRefsRef.current.clear();
       resetRenderCaches(true);
       resetSelectionState(true);
+      clearAllRenderRetryTimers();
 
       try {
         let source: ArrayBuffer;
@@ -274,12 +369,14 @@ export function PdfViewer({
       }
       suppressSelectionEventsRef.current = false;
       pendingReadyPageRef.current = null;
+      isProgrammaticScrollRef.current = false;
+      clearAllRenderRetryTimers();
       if (scrollRafRef.current !== null) {
         cancelAnimationFrame(scrollRafRef.current);
         scrollRafRef.current = null;
       }
     };
-  }, [file, resetRenderCaches, resetSelectionState]);
+  }, [clearAllRenderRetryTimers, file, resetRenderCaches, resetSelectionState]);
 
   const calculateFitWidthScale = useCallback(() => {
     if (!fitWidthMode || !onFitWidthScaleCalculated) {
@@ -308,7 +405,7 @@ export function PdfViewer({
   }, [basePageWidth, fitWidthMode, onFitWidthScaleCalculated, scale]);
 
   useEffect(() => {
-    if (!fitWidthMode) {
+    if (!isActive || !fitWidthMode) {
       return;
     }
 
@@ -349,10 +446,13 @@ export function PdfViewer({
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [calculateFitWidthScale, fitWidthMode]);
+  }, [calculateFitWidthScale, fitWidthMode, isActive]);
 
   const ensurePageCanvas = useCallback(async (pageNumber: number, expectedRenderSeq: number) => {
     if (expectedRenderSeq !== renderSeqRef.current) {
+      return;
+    }
+    if (!Number.isFinite(pageNumber) || pageNumber < 1 || pageNumber > pageCount) {
       return;
     }
     const doc = documentRef.current;
@@ -370,6 +470,9 @@ export function PdfViewer({
         await inFlight;
       } catch {
         // Ignore and allow follow-up attempts in next render cycle.
+      }
+      if (expectedRenderSeq === renderSeqRef.current && renderedCanvasScaleRef.current.get(pageNumber) !== scale) {
+        scheduleRenderRetry(pageNumber, expectedRenderSeq);
       }
       return;
     }
@@ -398,15 +501,22 @@ export function PdfViewer({
 
       const refs = await waitForPageRefs(pageNumber, expectedRenderSeq);
       if (!refs?.canvas) {
+        scheduleRenderRetry(pageNumber, expectedRenderSeq);
         return;
       }
 
-      await renderPage(page, refs.canvas, scale);
+      const renderTask = startRenderPage(page, refs.canvas, scale);
+      canvasRenderTasksRef.current.set(pageNumber, renderTask);
+      await renderTask.promise;
+      if (canvasRenderTasksRef.current.get(pageNumber) === renderTask) {
+        canvasRenderTasksRef.current.delete(pageNumber);
+      }
       if (expectedRenderSeq !== renderSeqRef.current) {
         return;
       }
 
       renderedCanvasScaleRef.current.set(pageNumber, scale);
+      clearRenderRetry(pageNumber, expectedRenderSeq);
       setRenderedPages((prev) => (prev[pageNumber] ? prev : { ...prev, [pageNumber]: true }));
     })();
 
@@ -414,19 +524,23 @@ export function PdfViewer({
     try {
       await task;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('TextLayer task cancelled')) {
+      if (!isRenderCancellationError(err)) {
         console.error(`Error rendering canvas for page ${pageNumber}:`, err);
+        scheduleRenderRetry(pageNumber, expectedRenderSeq);
       }
     } finally {
+      canvasRenderTasksRef.current.delete(pageNumber);
       if (canvasRenderLocksRef.current.get(pageNumber) === task) {
         canvasRenderLocksRef.current.delete(pageNumber);
       }
     }
-  }, [scale, waitForPageRefs]);
+  }, [clearRenderRetry, pageCount, scale, scheduleRenderRetry, waitForPageRefs]);
 
   const ensurePageTextLayer = useCallback(async (pageNumber: number, expectedRenderSeq: number) => {
     if (deleteMode || expectedRenderSeq !== renderSeqRef.current) {
+      return;
+    }
+    if (!Number.isFinite(pageNumber) || pageNumber < 1 || pageNumber > pageCount) {
       return;
     }
     const doc = documentRef.current;
@@ -445,6 +559,9 @@ export function PdfViewer({
       } catch {
         // Ignore and allow follow-up attempts in next render cycle.
       }
+      if (expectedRenderSeq === renderSeqRef.current && renderedTextScaleRef.current.get(pageNumber) !== scale) {
+        scheduleRenderRetry(pageNumber, expectedRenderSeq);
+      }
       return;
     }
 
@@ -456,6 +573,7 @@ export function PdfViewer({
 
       const refs = await waitForPageRefs(pageNumber, expectedRenderSeq);
       if (!refs?.textLayerContainer) {
+        scheduleRenderRetry(pageNumber, expectedRenderSeq);
         return;
       }
 
@@ -464,22 +582,23 @@ export function PdfViewer({
       nextTask.element.dataset.pageNumber = String(pageNumber);
       textLayerTasksRef.current.set(pageNumber, nextTask);
       renderedTextScaleRef.current.set(pageNumber, scale);
+      clearRenderRetry(pageNumber, expectedRenderSeq);
     })();
 
     textRenderLocksRef.current.set(pageNumber, task);
     try {
       await task;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('TextLayer task cancelled')) {
+      if (!isRenderCancellationError(err)) {
         console.error(`Error rendering text layer for page ${pageNumber}:`, err);
+        scheduleRenderRetry(pageNumber, expectedRenderSeq);
       }
     } finally {
       if (textRenderLocksRef.current.get(pageNumber) === task) {
         textRenderLocksRef.current.delete(pageNumber);
       }
     }
-  }, [deleteMode, scale, waitForPageRefs]);
+  }, [clearRenderRetry, deleteMode, pageCount, scale, scheduleRenderRetry, waitForPageRefs]);
 
   const isPageTextLayerReady = useCallback((pageNumber: number, layer?: HTMLDivElement | null): boolean => {
     if (!Number.isFinite(pageNumber) || pageNumber < 1) {
@@ -517,6 +636,7 @@ export function PdfViewer({
     const textTop = containerRect.top - viewportHeight * TEXT_BUFFER_VIEWPORTS;
     const textBottom = containerRect.bottom + viewportHeight * TEXT_BUFFER_VIEWPORTS;
     const viewportCenter = containerRect.top + viewportHeight / 2;
+    const safeCurrentPage = clampPage(currentPageRef.current, pageCount);
 
     const canvasCandidates: Array<{ page: number; distance: number }> = [];
     const textPages = new Set<number>();
@@ -540,9 +660,9 @@ export function PdfViewer({
       }
     }
 
-    if (canvasCandidates.length === 0 && currentPageRef.current >= 1) {
-      canvasCandidates.push({ page: currentPageRef.current, distance: 0 });
-      textPages.add(currentPageRef.current);
+    if (canvasCandidates.length === 0 && safeCurrentPage >= 1 && safeCurrentPage <= pageCount) {
+      canvasCandidates.push({ page: safeCurrentPage, distance: 0 });
+      textPages.add(safeCurrentPage);
     }
 
     canvasCandidates.sort((a, b) => a.distance - b.distance);
@@ -601,12 +721,16 @@ export function PdfViewer({
   }, []);
 
   const scheduleVisiblePageRender = useCallback(() => {
+    if (!isActive) {
+      return;
+    }
     if (!documentRef.current || pageCount === 0) {
       return;
     }
 
     const selectionLocked = selectionRenderLockRef.current || toolbarPosition !== null;
     const expectedRenderSeq = renderSeqRef.current;
+    const safeCurrentPage = clampPage(currentPageRef.current, pageCount);
     const { canvas, text } = collectRenderTargets();
     const canvasSet = new Set(canvas);
 
@@ -622,10 +746,10 @@ export function PdfViewer({
       }
     }
 
-    if (currentPageRef.current >= 1) {
-      canvasSet.add(currentPageRef.current);
+    if (safeCurrentPage >= 1 && safeCurrentPage <= pageCount) {
+      canvasSet.add(safeCurrentPage);
       if (!deleteMode) {
-        keptText.add(currentPageRef.current);
+        keptText.add(safeCurrentPage);
       }
     }
 
@@ -638,8 +762,8 @@ export function PdfViewer({
     }
 
     const orderedCanvas = Array.from(canvasSet).sort((a, b) => {
-      const da = Math.abs(a - currentPageRef.current);
-      const db = Math.abs(b - currentPageRef.current);
+      const da = Math.abs(a - safeCurrentPage);
+      const db = Math.abs(b - safeCurrentPage);
       return da - db;
     });
 
@@ -652,19 +776,33 @@ export function PdfViewer({
     }
 
     const orderedText = Array.from(keptText).sort((a, b) => {
-      const da = Math.abs(a - currentPageRef.current);
-      const db = Math.abs(b - currentPageRef.current);
+      const da = Math.abs(a - safeCurrentPage);
+      const db = Math.abs(b - safeCurrentPage);
       return da - db;
     });
 
     for (const pageNumber of orderedText) {
       void ensurePageTextLayer(pageNumber, expectedRenderSeq);
     }
-  }, [collectRenderTargets, deleteMode, ensurePageCanvas, ensurePageTextLayer, pageCount, pruneFarLayers, selectedPage, toolbarPosition]);
+  }, [collectRenderTargets, deleteMode, ensurePageCanvas, ensurePageTextLayer, isActive, pageCount, pruneFarLayers, selectedPage, toolbarPosition]);
 
   useEffect(() => {
     scheduleVisiblePageRenderRef.current = scheduleVisiblePageRender;
   }, [scheduleVisiblePageRender]);
+
+  useEffect(() => {
+    const wasActive = prevIsActiveRef.current;
+    prevIsActiveRef.current = isActive;
+
+    if (!isActive) {
+      cancelAllCanvasRenderTasks();
+      clearAllRenderRetryTimers();
+    }
+
+    if (!wasActive && isActive && pageCount > 0) {
+      scheduleVisiblePageRenderRef.current();
+    }
+  }, [cancelAllCanvasRenderTasks, clearAllRenderRetryTimers, isActive, pageCount]);
 
   const findPageFromScroll = useCallback(() => {
     if (!onPageChange || isProgrammaticScrollRef.current) {
@@ -683,7 +821,9 @@ export function PdfViewer({
     const parsedPage = pageNode?.dataset.pageNumber
       ? Number.parseInt(pageNode.dataset.pageNumber, 10)
       : NaN;
-    const nextPage = Number.isFinite(parsedPage) ? parsedPage : currentPageRef.current;
+    const nextPage = Number.isFinite(parsedPage)
+      ? clampPage(parsedPage, pageCount)
+      : clampPage(currentPageRef.current, pageCount);
     if (nextPage !== currentPageRef.current) {
       currentPageRef.current = nextPage;
       pageChangeFromScrollRef.current = nextPage;
@@ -695,10 +835,11 @@ export function PdfViewer({
     if (pageCount === 0) {
       return;
     }
+    clearAllRenderRetryTimers();
     renderSeqRef.current += 1;
     resetRenderCaches(true);
     scheduleVisiblePageRenderRef.current();
-  }, [pageCount, scale, resetRenderCaches]);
+  }, [clearAllRenderRetryTimers, pageCount, scale, resetRenderCaches]);
 
   useEffect(() => {
     if (pageCount === 0) {
@@ -708,7 +849,7 @@ export function PdfViewer({
   }, [deleteMode, pageCount]);
 
   useEffect(() => {
-    if (deleteMode || pageCount === 0 || currentPage < 1) {
+    if (!isActive || deleteMode || pageCount === 0 || currentPage < 1) {
       return;
     }
     const expectedRenderSeq = renderSeqRef.current;
@@ -719,9 +860,20 @@ export function PdfViewer({
     if (currentPage < pageCount) {
       void ensurePageTextLayer(currentPage + 1, expectedRenderSeq);
     }
-  }, [currentPage, deleteMode, ensurePageTextLayer, pageCount]);
+  }, [currentPage, deleteMode, ensurePageTextLayer, isActive, pageCount]);
 
   useEffect(() => {
+    if (pageCount === 0) {
+      return;
+    }
+    scheduleVisiblePageRenderRef.current();
+  }, [currentPage, pageCount]);
+
+  useEffect(() => {
+    if (!isActive) {
+      isProgrammaticScrollRef.current = false;
+      return;
+    }
     const container = containerRef.current;
     if (!container) {
       return;
@@ -751,11 +903,13 @@ export function PdfViewer({
         cancelAnimationFrame(scrollRafRef.current);
         scrollRafRef.current = null;
       }
+      isProgrammaticScrollRef.current = false;
     };
-  }, [findPageFromScroll]);
+  }, [findPageFromScroll, isActive]);
 
   useEffect(() => {
-    if (pageCount === 0) {
+    if (!isActive || pageCount === 0) {
+      isProgrammaticScrollRef.current = false;
       return;
     }
     if (pageChangeFromScrollRef.current === currentPage) {
@@ -786,8 +940,9 @@ export function PdfViewer({
 
     return () => {
       clearTimeout(timer);
+      isProgrammaticScrollRef.current = false;
     };
-  }, [currentPage, pageCount]);
+  }, [currentPage, isActive, pageCount]);
 
   const getSelectionLayer = useCallback((selection: Selection): SelectionLayer | null => {
     if (selection.rangeCount === 0) {
@@ -973,6 +1128,9 @@ export function PdfViewer({
   }, [deleteMode, getSelectionInfo, getSelectionLayer, isPageTextLayerReady, resetSelectionState]);
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
     const handlePointerDown = (event: PointerEvent) => {
       if (deleteMode) {
         return;
@@ -1152,6 +1310,7 @@ export function PdfViewer({
     deleteMode,
     ensurePageTextLayer,
     findAnnotationAtLayerPoint,
+    isActive,
     isPageTextLayerReady,
     onHighlightClick,
     resetSelectionState,

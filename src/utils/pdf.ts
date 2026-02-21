@@ -69,6 +69,20 @@ export async function renderPage(
   canvas: HTMLCanvasElement,
   scale: number = 1.0
 ): Promise<void> {
+  const task = startRenderPage(page, canvas, scale);
+  await task.promise;
+}
+
+export interface PdfCanvasRenderTask {
+  promise: Promise<void>;
+  cancel: () => void;
+}
+
+export function startRenderPage(
+  page: pdfjsLib.PDFPageProxy,
+  canvas: HTMLCanvasElement,
+  scale: number = 1.0
+): PdfCanvasRenderTask {
   const viewport = page.getViewport({ scale });
   const outputScale = window.devicePixelRatio || 1;
   const scaledWidth = Math.floor(viewport.width * outputScale);
@@ -87,7 +101,16 @@ export async function renderPage(
   };
 
   const renderTask = page.render(renderContext);
-  await renderTask.promise;
+  return {
+    promise: renderTask.promise,
+    cancel: () => {
+      try {
+        renderTask.cancel();
+      } catch {
+        // Ignore cancellation errors from already-completed tasks.
+      }
+    },
+  };
 }
 
 export interface PdfTextLayerTask {
