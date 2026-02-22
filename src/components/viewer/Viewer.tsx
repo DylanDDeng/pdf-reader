@@ -1,13 +1,19 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { X, FileText, ChevronRight } from 'lucide-react';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { ReaderToolbar } from './ReaderToolbar';
 import { ReaderSidebar } from './ReaderSidebar';
 import { PdfViewer, type AnnotationClickContext } from './PdfViewer';
 import { AnnotationPanel } from './AnnotationPanel';
+import { AiResultPanel } from './AiResultPanel';
+import { ChatPanel } from './ChatPanel';
 import type { Tab } from '../../hooks/useTabs';
 import type { Annotation, HighlightColor } from '../../types/annotation';
-import type { AiRuntimeConfig } from '../../types/ai';
+import type { AiRuntimeConfig, ChatMessage } from '../../types/ai';
+import { AiServiceError } from '../../types/ai';
 import { useAnnotations } from '../../hooks/useAnnotations';
+import { streamOpenRouterChatCompletion } from '../../services/aiService';
+import { extractPageText, extractDocumentText } from '../../utils/pdfTextExtract';
 
 interface ViewerProps {
   tabs: Tab[];
@@ -51,12 +57,31 @@ export function Viewer({
   const [panelAttention, setPanelAttention] = useState(false);
   const [attentionAnnotationId, setAttentionAnnotationId] = useState<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 1920, height: 1080 });
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [summaryState, setSummaryState] = useState<{
+    open: boolean;
+    title: string;
+    content: string;
+    status: 'idle' | 'loading' | 'streaming' | 'done' | 'error';
+    error: string | null;
+    warning: string | null;
+    truncated: boolean;
+    mode: 'page' | 'doc';
+  }>({
+    open: false, title: '', content: '', status: 'idle',
+    error: null, warning: null, truncated: false, mode: 'page',
+  });
 
   const annotationPanelRef = useRef<HTMLDivElement | null>(null);
   const focusGuideSeqRef = useRef(0);
   const focusGuideRafRef = useRef<number | null>(null);
   const focusGuideTimerRefs = useRef<number[]>([]);
   const previousTabCountRef = useRef(tabs.length);
+  const tabDocRefs = useRef<Map<string, PDFDocumentProxy>>(new Map());
+  const summaryAbortRef = useRef<AbortController | null>(null);
+  const chatAbortRef = useRef<AbortController | null>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -185,6 +210,14 @@ export function Viewer({
     setSelectedAnnotationId(null);
     setShowAnnotations(false);
     setEraseMode(false);
+    setShowChat(false);
+    setChatMessages([]);
+    setChatStreaming(false);
+    chatAbortRef.current?.abort();
+    chatAbortRef.current = null;
+    summaryAbortRef.current?.abort();
+    summaryAbortRef.current = null;
+    setSummaryState((prev) => ({ ...prev, open: false, status: 'idle' }));
   }, [activeTabId, clearFocusGuideAnimation]);
 
   useEffect(() => {
@@ -371,6 +404,234 @@ export function Viewer({
     }
   }, [deleteAnnotation, selectedAnnotationId]);
 
+  const handleDocumentReady = useCallback((tabId: string, doc: PDFDocumentProxy | null) => {
+    if (doc) {
+      tabDocRefs.current.set(tabId, doc);
+    } else {
+      tabDocRefs.current.delete(tabId);
+    }
+  }, []);
+
+  const getAiErrorMessage = useCallback((error: unknown): string => {
+    if (error instanceof AiServiceError) {
+      if (error.code === 'AUTH_INVALID') return 'OpenRouter API Key 无效，请检查设置。';
+      if (error.code === 'RATE_LIMIT') return 'OpenRouter 触发限流，请稍后重试。';
+      if (error.code === 'NETWORK_ERROR') return '网络请求失败，请检查网络连接。';
+      if (error.code === 'ABORTED') return '请求已取消。';
+      if (error.code === 'INVALID_CONFIG') return '请先在设置中填写 OpenRouter API Key 和模型。';
+      return error.message || 'AI 请求失败。';
+    }
+    return error instanceof Error ? error.message : 'AI 请求失败。';
+  }, []);
+
+  const validateAiConfig = useCallback((): string | null => {
+    if (!aiConfig.enabled) return 'AI 功能当前已关闭，请在设置中启用。';
+    if (!aiConfig.apiKey.trim()) return '请先在设置中配置 OpenRouter API Key。';
+    if (!aiConfig.model.trim()) return '请先在设置中配置 OpenRouter 模型。';
+    return null;
+  }, [aiConfig]);
+
+  const handleSummarizePage = useCallback(async () => {
+    if (!activeTab) return;
+    const doc = tabDocRefs.current.get(activeTab.id);
+    if (!doc) return;
+
+    const configError = validateAiConfig();
+    if (configError) {
+      setSummaryState({ open: true, title: 'AI 总结当前页', content: '', status: 'error', error: configError, warning: null, truncated: false, mode: 'page' });
+      return;
+    }
+
+    summaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    summaryAbortRef.current = controller;
+
+    const warning = aiConfig.todayRequestCount >= aiConfig.dailyUsageSoftLimit
+      ? `今日调用已达到 ${aiConfig.todayRequestCount} 次，超过提醒阈值 ${aiConfig.dailyUsageSoftLimit}。`
+      : null;
+
+    setSummaryState({ open: true, title: 'AI 总结当前页', content: '', status: 'loading', error: null, warning, truncated: false, mode: 'page' });
+
+    try {
+      const pageText = await extractPageText(doc, activeTab.currentPage);
+      if (!pageText.trim()) {
+        setSummaryState((prev) => ({ ...prev, status: 'error', error: '当前页没有可提取的文本。' }));
+        return;
+      }
+
+      await streamOpenRouterChatCompletion({
+        apiKey: aiConfig.apiKey.trim(),
+        model: aiConfig.model.trim(),
+        reasoningEnabled: aiConfig.reasoningEnabled,
+        messages: [
+          { role: 'system', content: '你是一个严谨的中文学术阅读助手。请对用户给出的文本做精炼的段落式摘要，语言简洁连贯，不要使用列表或要点形式，不要编造未出现的信息。' },
+          { role: 'user', content: `请总结下面这页的内容（第 ${activeTab.currentPage} 页）：\n\n${pageText}` },
+        ],
+        signal: controller.signal,
+        onDelta: (chunk) => {
+          setSummaryState((prev) => ({ ...prev, status: 'streaming', content: prev.content + chunk }));
+        },
+      });
+      setSummaryState((prev) => ({ ...prev, status: 'done' }));
+      onAiRequestFinished?.(true);
+    } catch (error) {
+      if (error instanceof AiServiceError && error.code === 'ABORTED') {
+        setSummaryState((prev) => ({ ...prev, status: 'idle', open: false }));
+        return;
+      }
+      setSummaryState((prev) => ({ ...prev, status: 'error', error: getAiErrorMessage(error) }));
+      onAiRequestFinished?.(false);
+    } finally {
+      if (summaryAbortRef.current === controller) summaryAbortRef.current = null;
+    }
+  }, [activeTab, aiConfig, getAiErrorMessage, onAiRequestFinished, validateAiConfig]);
+
+  const handleSummarizeDocument = useCallback(async () => {
+    if (!activeTab) return;
+    const doc = tabDocRefs.current.get(activeTab.id);
+    if (!doc) return;
+
+    const configError = validateAiConfig();
+    if (configError) {
+      setSummaryState({ open: true, title: 'AI 总结全文', content: '', status: 'error', error: configError, warning: null, truncated: false, mode: 'doc' });
+      return;
+    }
+
+    summaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    summaryAbortRef.current = controller;
+
+    const warning = aiConfig.todayRequestCount >= aiConfig.dailyUsageSoftLimit
+      ? `今日调用已达到 ${aiConfig.todayRequestCount} 次，超过提醒阈值 ${aiConfig.dailyUsageSoftLimit}。`
+      : null;
+
+    setSummaryState({ open: true, title: 'AI 总结全文', content: '', status: 'loading', error: null, warning, truncated: false, mode: 'doc' });
+
+    try {
+      const { text: docText, truncated } = await extractDocumentText(doc, { maxChars: 80_000 });
+      if (!docText.trim()) {
+        setSummaryState((prev) => ({ ...prev, status: 'error', error: '文档没有可提取的文本。' }));
+        return;
+      }
+
+      setSummaryState((prev) => ({ ...prev, truncated }));
+
+      await streamOpenRouterChatCompletion({
+        apiKey: aiConfig.apiKey.trim(),
+        model: aiConfig.model.trim(),
+        reasoningEnabled: aiConfig.reasoningEnabled,
+        messages: [
+          { role: 'system', content: '你是一个严谨的中文学术阅读助手。请对用户给出的文档内容做精炼的段落式摘要，语言简洁连贯，不要使用列表或要点形式，不要编造未出现的信息。' },
+          { role: 'user', content: `请总结下面这篇文档的内容：\n\n${docText}` },
+        ],
+        signal: controller.signal,
+        onDelta: (chunk) => {
+          setSummaryState((prev) => ({ ...prev, status: 'streaming', content: prev.content + chunk }));
+        },
+      });
+      setSummaryState((prev) => ({ ...prev, status: 'done' }));
+      onAiRequestFinished?.(true);
+    } catch (error) {
+      if (error instanceof AiServiceError && error.code === 'ABORTED') {
+        setSummaryState((prev) => ({ ...prev, status: 'idle', open: false }));
+        return;
+      }
+      setSummaryState((prev) => ({ ...prev, status: 'error', error: getAiErrorMessage(error) }));
+      onAiRequestFinished?.(false);
+    } finally {
+      if (summaryAbortRef.current === controller) summaryAbortRef.current = null;
+    }
+  }, [activeTab, aiConfig, getAiErrorMessage, onAiRequestFinished, validateAiConfig]);
+
+  const handleCloseSummary = useCallback(() => {
+    summaryAbortRef.current?.abort();
+    summaryAbortRef.current = null;
+    setSummaryState((prev) => ({ ...prev, open: false, status: 'idle' }));
+  }, []);
+
+  const handleSendChatMessage = useCallback(async (message: string) => {
+    if (!activeTab) return;
+    const doc = tabDocRefs.current.get(activeTab.id);
+    if (!doc) return;
+
+    const configError = validateAiConfig();
+    if (configError) {
+      const errorMsg: ChatMessage = { id: `err-${Date.now()}`, role: 'assistant', content: configError };
+      setChatMessages((prev) => [...prev, errorMsg]);
+      return;
+    }
+
+    const userMsg: ChatMessage = { id: `user-${Date.now()}`, role: 'user', content: message };
+    const assistantMsg: ChatMessage = { id: `asst-${Date.now()}`, role: 'assistant', content: '' };
+    setChatMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setChatStreaming(true);
+
+    chatAbortRef.current?.abort();
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
+
+    try {
+      const pageText = await extractPageText(doc, activeTab.currentPage);
+      const contextMessages = chatMessages
+        .filter((m) => m.content)
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+      await streamOpenRouterChatCompletion({
+        apiKey: aiConfig.apiKey.trim(),
+        model: aiConfig.model.trim(),
+        reasoningEnabled: aiConfig.reasoningEnabled,
+        messages: [
+          { role: 'system', content: `你是一个严谨的中文学术阅读助手。用户正在阅读一篇 PDF 文档。以下是当前页（第 ${activeTab.currentPage} 页）的文本内容，请基于此回答用户的问题。若信息不足，请明确说明。\n\n当前页内容：\n${pageText}` },
+          ...contextMessages,
+          { role: 'user', content: message },
+        ],
+        signal: controller.signal,
+        onDelta: (chunk) => {
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && last.role === 'assistant') {
+              updated[updated.length - 1] = { ...last, content: last.content + chunk };
+            }
+            return updated;
+          });
+        },
+      });
+      onAiRequestFinished?.(true);
+    } catch (error) {
+      if (error instanceof AiServiceError && error.code === 'ABORTED') {
+        return;
+      }
+      const errText = getAiErrorMessage(error);
+      setChatMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.role === 'assistant' && !last.content) {
+          updated[updated.length - 1] = { ...last, content: `错误：${errText}` };
+        }
+        return updated;
+      });
+      onAiRequestFinished?.(false);
+    } finally {
+      setChatStreaming(false);
+      if (chatAbortRef.current === controller) chatAbortRef.current = null;
+    }
+  }, [activeTab, aiConfig, chatMessages, getAiErrorMessage, onAiRequestFinished, validateAiConfig]);
+
+  const handleToggleChat = useCallback(() => {
+    setShowChat((prev) => {
+      if (!prev) setShowAnnotations(false);
+      return !prev;
+    });
+  }, []);
+
+  const handleToggleAnnotations = useCallback(() => {
+    setShowAnnotations((prev) => {
+      if (!prev) setShowChat(false);
+      return !prev;
+    });
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeTab) return;
@@ -470,12 +731,16 @@ export function Viewer({
             showContents={isSidebarOpen}
             showAnnotations={showAnnotations}
             eraseMode={eraseMode}
+            showChat={showChat}
             onToggleContents={() => setIsSidebarOpen((prev) => !prev)}
-            onToggleAnnotations={() => setShowAnnotations((prev) => !prev)}
+            onToggleAnnotations={handleToggleAnnotations}
             onToggleEraseMode={() => setEraseMode((prev) => !prev)}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onResetZoom={handleResetZoom}
+            onSummarizePage={() => { void handleSummarizePage(); }}
+            onSummarizeDocument={() => { void handleSummarizeDocument(); }}
+            onToggleChat={handleToggleChat}
           />
 
           <div className="flex-1 flex overflow-hidden min-h-0 min-w-0">
@@ -527,6 +792,7 @@ export function Viewer({
                           isActive={isActive}
                           aiConfig={aiConfig}
                           onAiRequestFinished={onAiRequestFinished}
+                          onDocumentReady={(doc) => handleDocumentReady(tab.id, doc)}
                         />
                       </div>
                     </div>
@@ -534,7 +800,7 @@ export function Viewer({
                 })}
             </div>
 
-            {showAnnotations && activeTab && (
+            {showAnnotations && !showChat && activeTab && (
               <div
                 ref={annotationPanelRef}
                 className={`w-80 bg-white/85 border-l border-black/10 border-dashed flex flex-col backdrop-blur-[1px] ${
@@ -565,7 +831,37 @@ export function Viewer({
                 />
               </div>
             )}
+
+            {showChat && !showAnnotations && activeTab && (
+              <ChatPanel
+                messages={chatMessages}
+                isStreaming={chatStreaming}
+                onSend={(msg) => { void handleSendChatMessage(msg); }}
+                onClose={() => setShowChat(false)}
+              />
+            )}
           </div>
+
+          {summaryState.open && (
+            <AiResultPanel
+              title={summaryState.title}
+              content={summaryState.content}
+              status={summaryState.status}
+              error={summaryState.error}
+              warning={summaryState.warning}
+              truncated={summaryState.truncated}
+              onClose={handleCloseSummary}
+              onCopy={() => { void navigator.clipboard.writeText(summaryState.content); }}
+              onRetry={() => {
+                if (summaryState.mode === 'page') {
+                  void handleSummarizePage();
+                } else {
+                  void handleSummarizeDocument();
+                }
+              }}
+              onStop={() => { summaryAbortRef.current?.abort(); }}
+            />
+          )}
 
           {(focusGuide || focusOrigin) && (
             <div className="archive-focus-overlay" aria-hidden>

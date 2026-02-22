@@ -14,6 +14,7 @@ import { SelectionToolbar, type AnnotationAction } from './SelectionToolbar';
 import type { Annotation, HighlightColor } from '../../types/annotation';
 import { streamOpenRouterChatCompletion } from '../../services/aiService';
 import { AiServiceError, type AiRequestMode, type AiRuntimeConfig } from '../../types/ai';
+import { AiResultPanel } from './AiResultPanel';
 
 interface PdfViewerProps {
   file: File | string;
@@ -42,6 +43,7 @@ interface PdfViewerProps {
   deleteMode?: boolean;
   aiConfig: AiRuntimeConfig;
   onAiRequestFinished?: (success: boolean) => void;
+  onDocumentReady?: (doc: PDFDocumentProxy | null) => void;
 }
 
 interface PageRefs {
@@ -123,6 +125,7 @@ export function PdfViewer({
   deleteMode = false,
   aiConfig,
   onAiRequestFinished,
+  onDocumentReady,
 }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onDocumentLoadRef = useRef(onDocumentLoad);
@@ -350,6 +353,7 @@ export function PdfViewer({
         }
 
         documentRef.current = doc;
+        onDocumentReady?.(doc);
         const outline = await extractOutline(doc);
         if (!isMounted || loadSeq !== renderSeqRef.current) {
           return;
@@ -387,6 +391,7 @@ export function PdfViewer({
       if (documentRef.current) {
         documentRef.current.destroy();
         documentRef.current = null;
+        onDocumentReady?.(null);
       }
       if (selectionTimeoutRef.current) {
         clearTimeout(selectionTimeoutRef.current);
@@ -1701,70 +1706,24 @@ export function PdfViewer({
       )}
 
       {aiState.open && (
-        <div className="fixed z-[55] right-5 bottom-5 w-[420px] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white shadow-xl overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-black/10 bg-black/[0.03]">
-            <div className="text-xs font-semibold tracking-wide uppercase text-[var(--archive-ink-black)]">
-              {aiState.title}
-            </div>
-            <button
-              type="button"
-              onClick={closeAiPanel}
-              className="inline-flex h-7 w-7 items-center justify-center rounded hover:bg-black/5 text-[var(--archive-ink-grey)]"
-              title="关闭 AI 结果"
-              aria-label="关闭 AI 结果"
-            >
-              ×
-            </button>
-          </div>
-
-          <div className="px-3 py-2 max-h-[46vh] overflow-auto text-sm leading-6 text-[var(--archive-ink-black)] whitespace-pre-wrap">
-            {aiState.warning && (
-              <div className="mb-2 rounded-md border border-amber-300/70 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-                {aiState.warning}
-              </div>
-            )}
-            {aiState.question && (
-              <div className="mb-2 text-xs text-[var(--archive-ink-grey)]">
-                问题：{aiState.question}
-              </div>
-            )}
-            {(aiState.status === 'loading' || aiState.status === 'streaming') && aiState.content.length === 0 && (
-              <div className="text-[var(--archive-ink-grey)]">AI 正在思考...</div>
-            )}
-            {aiState.content && <div>{aiState.content}</div>}
-            {aiState.error && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-                {aiState.error}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-black/10 bg-black/[0.02]">
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard.writeText(aiState.content);
-              }}
-              className="archive-action-btn !h-8 !px-3 text-xs"
-              disabled={!aiState.content}
-            >
-              复制结果
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (aiState.mode === 'summary') {
-                  void runAiAction('summary');
-                } else {
-                  void runAiAction('ask');
-                }
-              }}
-              className="archive-action-btn archive-action-btn-primary !h-8 !px-3 text-xs"
-            >
-              重试
-            </button>
-          </div>
-        </div>
+        <AiResultPanel
+          title={aiState.title}
+          content={aiState.content}
+          status={aiState.status}
+          error={aiState.error}
+          warning={aiState.warning}
+          question={aiState.question}
+          onClose={closeAiPanel}
+          onCopy={() => { void navigator.clipboard.writeText(aiState.content); }}
+          onRetry={() => {
+            if (aiState.mode === 'summary') {
+              void runAiAction('summary');
+            } else {
+              void runAiAction('ask');
+            }
+          }}
+          onStop={() => { aiAbortRef.current?.abort(); }}
+        />
       )}
     </div>
   );
