@@ -4,7 +4,6 @@ import { ReaderToolbar } from './ReaderToolbar';
 import { ReaderSidebar } from './ReaderSidebar';
 import { PdfViewer, type AnnotationClickContext } from './PdfViewer';
 import { AnnotationPanel } from './AnnotationPanel';
-import type { OutlineItem } from '../../utils/pdf';
 import type { Tab } from '../../hooks/useTabs';
 import type { Annotation, HighlightColor } from '../../types/annotation';
 import { useAnnotations } from '../../hooks/useAnnotations';
@@ -36,8 +35,8 @@ export function Viewer({
   onTabClose,
   onTabUpdate,
 }: ViewerProps) {
-  const [totalPages, setTotalPages] = useState(0);
-  const [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [tabPageCounts, setTabPageCounts] = useState<Record<string, number>>({});
+  const [mountedTabIds, setMountedTabIds] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [eraseMode, setEraseMode] = useState(false);
@@ -201,38 +200,66 @@ export function Viewer({
   }, [clearFocusGuideAnimation]);
 
   useEffect(() => {
+    if (!activeTabId) {
+      return;
+    }
+    setMountedTabIds((prev) => (prev.includes(activeTabId) ? prev : [...prev, activeTabId]));
+  }, [activeTabId]);
+
+  useEffect(() => {
+    setMountedTabIds((prev) => prev.filter((tabId) => tabs.some((tab) => tab.id === tabId)));
+    setTabPageCounts((prev) => {
+      const aliveIds = new Set(tabs.map((tab) => tab.id));
+      let changed = false;
+      const next: Record<string, number> = {};
+      Object.entries(prev).forEach(([tabId, count]) => {
+        if (aliveIds.has(tabId)) {
+          next[tabId] = count;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [tabs]);
+
+  useEffect(() => {
     if (tabs.length > previousTabCountRef.current) {
       setIsSidebarOpen(false);
     }
     previousTabCountRef.current = tabs.length;
   }, [tabs.length]);
 
-  const handleDocumentLoad = useCallback((pages: number, pdfOutline: OutlineItem[]) => {
-    setTotalPages(pages);
-    setOutline(pdfOutline);
+  const handleDocumentLoad = useCallback((tabId: string, pages: number) => {
+    const safePages = Math.max(1, Math.floor(pages || 1));
+    setTabPageCounts((prev) => (prev[tabId] === safePages ? prev : { ...prev, [tabId]: safePages }));
 
-    if (!activeTabId) {
+    const current = tabs.find((tab) => tab.id === tabId)?.currentPage ?? 1;
+    if (current > safePages) {
+      onTabUpdate(tabId, { currentPage: safePages });
+    }
+  }, [onTabUpdate, tabs]);
+
+  const handlePageChangeForTab = useCallback((tabId: string, page: number) => {
+    const targetTab = tabs.find((tab) => tab.id === tabId);
+    if (!targetTab) {
       return;
     }
 
-    const current = tabs.find((tab) => tab.id === activeTabId)?.currentPage ?? 1;
-    if (current > pages) {
-      onTabUpdate(activeTabId, { currentPage: pages });
+    const pageLimit = tabPageCounts[tabId] && tabPageCounts[tabId] > 0 ? tabPageCounts[tabId] : 1;
+    const nextPage = Math.max(1, Math.min(page, pageLimit));
+
+    if (nextPage !== targetTab.currentPage) {
+      onTabUpdate(tabId, { currentPage: nextPage });
     }
-  }, [activeTabId, onTabUpdate, tabs]);
+  }, [onTabUpdate, tabPageCounts, tabs]);
 
   const handlePageChange = useCallback((page: number) => {
     if (!activeTab) {
       return;
     }
-
-    const pageLimit = totalPages > 0 ? totalPages : 1;
-    const nextPage = Math.max(1, Math.min(page, pageLimit));
-
-    if (nextPage !== activeTab.currentPage) {
-      onTabUpdate(activeTab.id, { currentPage: nextPage });
-    }
-  }, [activeTab, onTabUpdate, totalPages]);
+    handlePageChangeForTab(activeTab.id, page);
+  }, [activeTab, handlePageChangeForTab]);
 
   const handlePrevPage = useCallback(() => {
     if (!activeTab) {
@@ -290,17 +317,6 @@ export function Viewer({
     if (activeTab.zoomMode !== 'custom' || activeTab.scale !== 1) {
       onTabUpdate(activeTab.id, { zoomMode: 'custom', scale: 1 });
     }
-  }, [activeTab, onTabUpdate]);
-
-  const handleFitWidthScaleCalculated = useCallback((nextScale: number) => {
-    if (!activeTab || activeTab.zoomMode !== 'fit_width') {
-      return;
-    }
-    if (Math.abs(nextScale - activeTab.scale) <= 0.01) {
-      return;
-    }
-
-    onTabUpdate(activeTab.id, { scale: nextScale });
   }, [activeTab, onTabUpdate]);
 
   const handleAddHighlight = useCallback((
@@ -422,7 +438,9 @@ export function Viewer({
               )}
 
               <FileText className="w-4 h-4 shrink-0" />
-              <span className="text-sm truncate flex-1">{tab.fileName}</span>
+              <span className="text-sm truncate flex-1" title={tab.fileName}>
+                {tab.fileName}
+              </span>
 
               <button
                 onClick={(e) => {
@@ -455,38 +473,61 @@ export function Viewer({
             onResetZoom={handleResetZoom}
           />
 
-          <div className="flex-1 flex overflow-hidden min-h-0">
-            {isSidebarOpen && (
-              <ReaderSidebar
-                file={activeTab.file}
-                fileName={activeTab.fileName}
-                outline={outline}
-                currentPage={activeTab.currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
-                onBack={() => onTabClose(activeTab.id)}
-              />
-            )}
+          <div className="flex-1 flex overflow-hidden min-h-0 min-w-0">
+            <div className="flex-1 relative min-h-0 min-w-0 overflow-hidden">
+              {tabs
+                .filter((tab) => mountedTabIds.includes(tab.id))
+                .map((tab) => {
+                  const isActive = tab.id === activeTabId;
+                  const tabAnnotations = tab.annotationKey === fileId ? annotations : [];
+                  const tabTotalPages = tabPageCounts[tab.id] ?? 0;
+                  return (
+                    <div
+                      key={tab.id}
+                      className={`${isActive ? 'flex' : 'hidden'} h-full min-h-0 min-w-0 overflow-hidden`}
+                    >
+                      {isSidebarOpen && (
+                        <ReaderSidebar
+                          file={tab.file}
+                          currentPage={tab.currentPage}
+                          totalPages={tabTotalPages}
+                          onPageChange={(page) => handlePageChangeForTab(tab.id, page)}
+                          onBack={() => onTabClose(tab.id)}
+                        />
+                      )}
 
-            <div className="flex-1 relative min-h-0 min-w-0">
-              <PdfViewer
-                file={activeTab.file}
-                currentPage={activeTab.currentPage}
-                scale={activeTab.scale}
-                fitWidthMode={activeTab.zoomMode === 'fit_width'}
-                onFitWidthScaleCalculated={handleFitWidthScaleCalculated}
-                annotations={annotations}
-                onDocumentLoad={handleDocumentLoad}
-                onPageChange={handlePageChange}
-                onAddHighlight={handleAddHighlight}
-                onAddUnderline={handleAddUnderline}
-                onHighlightClick={handleHighlightClick}
-                interactiveHighlights={false}
-                deleteMode={eraseMode}
-              />
+                      <div className="flex-1 relative min-h-0 min-w-0">
+                        <PdfViewer
+                          file={tab.file}
+                          currentPage={tab.currentPage}
+                          scale={tab.scale}
+                          fitWidthMode={tab.zoomMode === 'fit_width'}
+                          onFitWidthScaleCalculated={(nextScale) => {
+                            if (!isActive || tab.zoomMode !== 'fit_width') {
+                              return;
+                            }
+                            if (Math.abs(nextScale - tab.scale) <= 0.01) {
+                              return;
+                            }
+                            onTabUpdate(tab.id, { scale: nextScale });
+                          }}
+                          annotations={tabAnnotations}
+                          onDocumentLoad={(pages) => handleDocumentLoad(tab.id, pages)}
+                          onPageChange={(page) => handlePageChangeForTab(tab.id, page)}
+                          onAddHighlight={handleAddHighlight}
+                          onAddUnderline={handleAddUnderline}
+                          onHighlightClick={handleHighlightClick}
+                          interactiveHighlights={false}
+                          deleteMode={eraseMode}
+                          isActive={isActive}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
 
-            {showAnnotations && (
+            {showAnnotations && activeTab && (
               <div
                 ref={annotationPanelRef}
                 className={`w-80 bg-white/85 border-l border-black/10 border-dashed flex flex-col backdrop-blur-[1px] ${

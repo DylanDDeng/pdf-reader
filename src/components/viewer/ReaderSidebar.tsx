@@ -1,26 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import { loadPdfDocument, type OutlineItem } from '../../utils/pdf';
+import { loadPdfDocument } from '../../utils/pdf';
 
 interface ReaderSidebarProps {
   file: File | string;
-  fileName: string | null;
-  outline: OutlineItem[];
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
   onBack: () => void;
 }
 
-function stripPdfExt(name: string | null): string {
-  if (!name) return 'Document';
-  return name.replace(/\.pdf$/i, '');
-}
-
 export function ReaderSidebar({
   file,
-  fileName,
-  outline,
   currentPage,
   totalPages,
   onPageChange,
@@ -28,17 +19,11 @@ export function ReaderSidebar({
 }: ReaderSidebarProps) {
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const renderSeqRef = useRef(0);
+  const activeThumbRenderTaskRef = useRef<ReturnType<PDFPageProxy['render']> | null>(null);
   const [renderedThumbs, setRenderedThumbs] = useState<Record<number, boolean>>({});
 
-  const cleanName = stripPdfExt(fileName);
-  const subtitle = outline.find((item) => item.level === 0)?.title || 'Reading Document';
-
   const resolvePageLabel = (page: number): string => {
-    const hit = outline.find((item) => item.page === page);
-    if (!hit) {
-      return `Page ${String(page).padStart(2, '0')} — Reading`;
-    }
-    return `Page ${String(page).padStart(2, '0')} — ${hit.title}`;
+    return `Page ${String(page).padStart(2, '0')}`;
   };
 
   const setCanvasRef = useCallback((pageNum: number, node: HTMLCanvasElement | null) => {
@@ -82,8 +67,15 @@ export function ReaderSidebar({
       viewport,
       transform,
     });
+    activeThumbRenderTaskRef.current = renderTask;
 
-    await renderTask.promise;
+    try {
+      await renderTask.promise;
+    } finally {
+      if (activeThumbRenderTaskRef.current === renderTask) {
+        activeThumbRenderTaskRef.current = null;
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -114,7 +106,7 @@ export function ReaderSidebar({
         doc = await loadPdfDocument(source);
         const pageLimit = Math.min(totalPages, doc.numPages);
 
-        for (let pageNum = 1; pageNum <= pageLimit; pageNum += 1) {
+        const renderSingleThumb = async (pageNum: number) => {
           if (cancelled || seq !== renderSeqRef.current) {
             return;
           }
@@ -132,9 +124,12 @@ export function ReaderSidebar({
           }
 
           if (!canvas) {
-            continue;
+            return;
           }
 
+          if (!doc) {
+            return;
+          }
           const page = await doc.getPage(pageNum);
           if (cancelled || seq !== renderSeqRef.current) {
             return;
@@ -146,6 +141,32 @@ export function ReaderSidebar({
           }
 
           setRenderedThumbs((prev) => (prev[pageNum] ? prev : { ...prev, [pageNum]: true }));
+        };
+
+        const priorityPages = [currentPage, currentPage - 1, currentPage + 1, 1]
+          .filter((pageNum) => Number.isFinite(pageNum) && pageNum >= 1 && pageNum <= pageLimit);
+        const prioritySet = new Set<number>();
+
+        for (const pageNum of priorityPages) {
+          if (prioritySet.has(pageNum)) {
+            continue;
+          }
+          prioritySet.add(pageNum);
+          await renderSingleThumb(pageNum);
+          if (cancelled || seq !== renderSeqRef.current) {
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }
+
+        for (let pageNum = 1; pageNum <= pageLimit; pageNum += 1) {
+          if (prioritySet.has(pageNum)) {
+            continue;
+          }
+          await renderSingleThumb(pageNum);
+          if (cancelled || seq !== renderSeqRef.current) {
+            return;
+          }
           await new Promise((resolve) => window.setTimeout(resolve, 0));
         }
       } catch (err) {
@@ -163,6 +184,10 @@ export function ReaderSidebar({
 
     return () => {
       cancelled = true;
+      if (activeThumbRenderTaskRef.current) {
+        activeThumbRenderTaskRef.current.cancel();
+        activeThumbRenderTaskRef.current = null;
+      }
     };
   }, [file, renderThumbPage, totalPages]);
 
@@ -172,15 +197,6 @@ export function ReaderSidebar({
         <span className="archive-reader-brand-icon" />
         <span>DocFlow / Back</span>
       </button>
-
-      <div className="archive-doc-nav-header">
-        <span className="archive-caps text-[var(--archive-ink-grey)]" title={cleanName}>
-          {cleanName}
-        </span>
-        <div className="archive-doc-nav-subtitle" title={subtitle}>
-          {subtitle}
-        </div>
-      </div>
 
       <div className="archive-page-thumb-list">
         {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
