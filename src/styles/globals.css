@@ -909,6 +909,9 @@ input:focus-visible {
 .archive-settings-modal {
   position: relative;
   width: min(640px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
   border-radius: 18px;
   border: 1px solid rgba(0, 0, 0, 0.1);
   background: rgba(255, 255, 255, 0.92);
@@ -961,6 +964,9 @@ input:focus-visible {
 
 .archive-settings-content {
   padding: 22px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .archive-settings-section-title {
