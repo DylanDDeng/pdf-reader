@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { X, FileText } from 'lucide-react';
+import { X, FileText, ChevronRight } from 'lucide-react';
 import { ReaderToolbar } from './ReaderToolbar';
 import { ReaderSidebar } from './ReaderSidebar';
 import { PdfViewer, type AnnotationClickContext } from './PdfViewer';
@@ -485,8 +485,17 @@ export function Viewer({
                   panelAttention ? 'archive-annotation-panel-guided' : ''
                 }`}
               >
-                <div className="px-4 py-3 border-b border-black/10 border-dashed">
+                <div className="px-4 py-3 border-b border-black/10 border-dashed flex items-center justify-between gap-2">
                   <h3 className="font-medium text-[var(--archive-ink-black)] uppercase tracking-[0.06em] text-xs">批注</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowAnnotations(false)}
+                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded border border-black/10 text-[var(--archive-ink-grey)] transition-colors hover:bg-white hover:text-[var(--archive-ink-black)]"
+                    title="收起批注面板"
+                    aria-label="收起批注面板"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
                 <AnnotationPanel
                   annotations={getAllAnnotations()}
