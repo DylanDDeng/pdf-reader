@@ -38,7 +38,7 @@ export function Viewer({
 }: ViewerProps) {
   const [totalPages, setTotalPages] = useState(0);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [eraseMode, setEraseMode] = useState(false);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -52,6 +52,7 @@ export function Viewer({
   const focusGuideSeqRef = useRef(0);
   const focusGuideRafRef = useRef<number | null>(null);
   const focusGuideTimerRefs = useRef<number[]>([]);
+  const previousTabCountRef = useRef(tabs.length);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -198,6 +199,13 @@ export function Viewer({
       clearFocusGuideAnimation();
     };
   }, [clearFocusGuideAnimation]);
+
+  useEffect(() => {
+    if (tabs.length > previousTabCountRef.current) {
+      setIsSidebarOpen(false);
+    }
+    previousTabCountRef.current = tabs.length;
+  }, [tabs.length]);
 
   const handleDocumentLoad = useCallback((pages: number, pdfOutline: OutlineItem[]) => {
     setTotalPages(pages);
