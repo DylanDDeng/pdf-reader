@@ -6,6 +6,7 @@ import { PdfViewer, type AnnotationClickContext } from './PdfViewer';
 import { AnnotationPanel } from './AnnotationPanel';
 import type { Tab } from '../../hooks/useTabs';
 import type { Annotation, HighlightColor } from '../../types/annotation';
+import type { AiRuntimeConfig } from '../../types/ai';
 import { useAnnotations } from '../../hooks/useAnnotations';
 
 interface ViewerProps {
@@ -17,6 +18,8 @@ interface ViewerProps {
     tabId: string,
     updates: Partial<Omit<Tab, 'id' | 'file' | 'fileName' | 'annotationKey'>>
   ) => void;
+  aiConfig: AiRuntimeConfig;
+  onAiRequestFinished?: (success: boolean) => void;
 }
 
 const SCALE_STEP = 0.25;
@@ -34,6 +37,8 @@ export function Viewer({
   onTabChange,
   onTabClose,
   onTabUpdate,
+  aiConfig,
+  onAiRequestFinished,
 }: ViewerProps) {
   const [tabPageCounts, setTabPageCounts] = useState<Record<string, number>>({});
   const [mountedTabIds, setMountedTabIds] = useState<string[]>([]);
@@ -520,6 +525,8 @@ export function Viewer({
                           interactiveHighlights={false}
                           deleteMode={eraseMode}
                           isActive={isActive}
+                          aiConfig={aiConfig}
+                          onAiRequestFinished={onAiRequestFinished}
                         />
                       </div>
                     </div>

@@ -12,6 +12,8 @@ import {
 import { HighlightLayer } from './HighlightLayer';
 import { SelectionToolbar, type AnnotationAction } from './SelectionToolbar';
 import type { Annotation, HighlightColor } from '../../types/annotation';
+import { streamOpenRouterChatCompletion } from '../../services/aiService';
+import { AiServiceError, type AiRequestMode, type AiRuntimeConfig } from '../../types/ai';
 
 interface PdfViewerProps {
   file: File | string;
@@ -38,6 +40,8 @@ interface PdfViewerProps {
   onHighlightClick?: (annotation: Annotation, context?: AnnotationClickContext) => void;
   interactiveHighlights?: boolean;
   deleteMode?: boolean;
+  aiConfig: AiRuntimeConfig;
+  onAiRequestFinished?: (success: boolean) => void;
 }
 
 interface PageRefs {
@@ -117,6 +121,8 @@ export function PdfViewer({
   onHighlightClick,
   interactiveHighlights = false,
   deleteMode = false,
+  aiConfig,
+  onAiRequestFinished,
 }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onDocumentLoadRef = useRef(onDocumentLoad);
@@ -158,6 +164,27 @@ export function PdfViewer({
   const [selectedRects, setSelectedRects] = useState<Array<{ left: number; top: number; width: number; height: number }>>([]);
   const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedColor, setSelectedColor] = useState<HighlightColor>('yellow');
+  const [aiState, setAiState] = useState<{
+    open: boolean;
+    mode: AiRequestMode;
+    status: 'idle' | 'loading' | 'streaming' | 'done' | 'error';
+    title: string;
+    question: string;
+    content: string;
+    error: string | null;
+    warning: string | null;
+  }>({
+    open: false,
+    mode: 'summary',
+    status: 'idle',
+    title: '',
+    question: '',
+    content: '',
+    error: null,
+    warning: null,
+  });
+
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   const destroyTextLayerTasks = useCallback(() => {
     textLayerTasksRef.current.forEach((task) => {
@@ -1318,6 +1345,158 @@ export function PdfViewer({
     updateSelectionFromWindow,
   ]);
 
+  const closeAiPanel = () => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiState((prev) => ({ ...prev, open: false, status: 'idle' }));
+  };
+
+  const getAiErrorMessage = (error: unknown): string => {
+    if (error instanceof AiServiceError) {
+      if (error.code === 'AUTH_INVALID') {
+        return 'OpenRouter API Key 无效，请检查设置。';
+      }
+      if (error.code === 'RATE_LIMIT') {
+        return 'OpenRouter 触发限流，请稍后重试。';
+      }
+      if (error.code === 'NETWORK_ERROR') {
+        return '网络请求失败，请检查网络连接。';
+      }
+      if (error.code === 'ABORTED') {
+        return '请求已取消。';
+      }
+      if (error.code === 'INVALID_CONFIG') {
+        return '请先在设置中填写 OpenRouter API Key 和模型。';
+      }
+      return error.message || 'AI 请求失败。';
+    }
+    return error instanceof Error ? error.message : 'AI 请求失败。';
+  };
+
+  const runAiAction = async (mode: AiRequestMode) => {
+    if (!selectedText || selectedRects.length === 0 || !selectedPage) {
+      return;
+    }
+    if (!aiConfig.enabled) {
+      setAiState({
+        open: true,
+        mode,
+        status: 'error',
+        title: 'AI 未启用',
+        question: '',
+        content: '',
+        error: 'AI 功能当前已关闭，请在设置中启用。',
+        warning: null,
+      });
+      return;
+    }
+    const normalizedApiKey = aiConfig.apiKey.trim();
+    const normalizedModel = aiConfig.model.trim();
+
+    if (!normalizedApiKey || !normalizedModel) {
+      const missingConfigMessage = !normalizedApiKey && !normalizedModel
+        ? '请先在设置中配置 OpenRouter API Key 和模型。'
+        : !normalizedApiKey
+          ? '请先在设置中配置 OpenRouter API Key。'
+          : '请先在设置中配置 OpenRouter 模型。';
+      setAiState({
+        open: true,
+        mode,
+        status: 'error',
+        title: '配置缺失',
+        question: '',
+        content: '',
+        error: missingConfigMessage,
+        warning: null,
+      });
+      return;
+    }
+
+    let question = '';
+    if (mode === 'ask') {
+      const input = window.prompt('请输入你想问 AI 的问题');
+      if (!input || !input.trim()) {
+        return;
+      }
+      question = input.trim();
+    }
+
+    const warning =
+      aiConfig.todayRequestCount >= aiConfig.dailyUsageSoftLimit
+        ? `今日调用已达到 ${aiConfig.todayRequestCount} 次，超过提醒阈值 ${aiConfig.dailyUsageSoftLimit}。`
+        : null;
+
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+
+    const title = mode === 'summary' ? 'AI 总结' : 'AI 问答';
+    setAiState({
+      open: true,
+      mode,
+      status: 'loading',
+      title,
+      question,
+      content: '',
+      error: null,
+      warning,
+    });
+
+    const systemPrompt = mode === 'summary'
+      ? '你是一个严谨的中文学术阅读助手。请对用户给出的选中文本做精炼总结：输出3-5条要点，不要编造未出现的信息。'
+      : '你是一个严谨的中文学术阅读助手。请仅基于用户给出的选中文本回答问题；若信息不足，请明确说明信息不足。';
+
+    const userPrompt = mode === 'summary'
+      ? `请总结下面这段选中文本：\n\n${selectedText}`
+      : `选中文本：\n${selectedText}\n\n问题：${question}`;
+
+    try {
+      await streamOpenRouterChatCompletion({
+        apiKey: normalizedApiKey,
+        model: normalizedModel,
+        reasoningEnabled: aiConfig.reasoningEnabled,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        signal: controller.signal,
+        onDelta: (chunk) => {
+          setAiState((prev) => ({
+            ...prev,
+            open: true,
+            status: 'streaming',
+            content: prev.content + chunk,
+          }));
+        },
+      });
+      setAiState((prev) => ({
+        ...prev,
+        status: 'done',
+        error: null,
+      }));
+      onAiRequestFinished?.(true);
+    } catch (error) {
+      if (error instanceof AiServiceError && error.code === 'ABORTED') {
+        setAiState((prev) => ({
+          ...prev,
+          status: 'idle',
+          error: null,
+        }));
+        return;
+      }
+      setAiState((prev) => ({
+        ...prev,
+        status: 'error',
+        error: getAiErrorMessage(error),
+      }));
+      onAiRequestFinished?.(false);
+    } finally {
+      if (aiAbortRef.current === controller) {
+        aiAbortRef.current = null;
+      }
+    }
+  };
+
   const handleToolbarAction = (action: AnnotationAction) => {
     if (!selectedText || selectedRects.length === 0 || !selectedPage) {
       return;
@@ -1332,12 +1511,24 @@ export function PdfViewer({
 
     if (action === 'highlight') {
       onAddHighlight(selectedPage, selectedText, selectedColor, scaledRects);
-    } else if (action === 'underline') {
-      onAddUnderline(selectedPage, selectedText, selectedColor, scaledRects);
-    } else {
+      resetSelectionState(true);
       return;
     }
-    resetSelectionState(true);
+
+    if (action === 'underline') {
+      onAddUnderline(selectedPage, selectedText, selectedColor, scaledRects);
+      resetSelectionState(true);
+      return;
+    }
+
+    if (action === 'ai_summary') {
+      void runAiAction('summary');
+      return;
+    }
+
+    if (action === 'ai_ask') {
+      void runAiAction('ask');
+    }
   };
 
   const handleCloseToolbar = () => {
@@ -1345,6 +1536,17 @@ export function PdfViewer({
   };
 
   useEffect(() => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiState((prev) => ({
+      ...prev,
+      open: false,
+      status: 'idle',
+      content: '',
+      error: null,
+      warning: null,
+      question: '',
+    }));
     isPointerSelectingRef.current = false;
     suppressSelectionEventsRef.current = false;
     pendingReadyPageRef.current = null;
@@ -1355,6 +1557,11 @@ export function PdfViewer({
     }
     resetSelectionState(true);
   }, [file, scale, resetSelectionState]);
+
+  useEffect(() => () => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (deleteMode) {
@@ -1491,6 +1698,73 @@ export function PdfViewer({
           onAction={handleToolbarAction}
           onClose={handleCloseToolbar}
         />
+      )}
+
+      {aiState.open && (
+        <div className="fixed z-[55] right-5 bottom-5 w-[420px] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white shadow-xl overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-black/10 bg-black/[0.03]">
+            <div className="text-xs font-semibold tracking-wide uppercase text-[var(--archive-ink-black)]">
+              {aiState.title}
+            </div>
+            <button
+              type="button"
+              onClick={closeAiPanel}
+              className="inline-flex h-7 w-7 items-center justify-center rounded hover:bg-black/5 text-[var(--archive-ink-grey)]"
+              title="关闭 AI 结果"
+              aria-label="关闭 AI 结果"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="px-3 py-2 max-h-[46vh] overflow-auto text-sm leading-6 text-[var(--archive-ink-black)] whitespace-pre-wrap">
+            {aiState.warning && (
+              <div className="mb-2 rounded-md border border-amber-300/70 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+                {aiState.warning}
+              </div>
+            )}
+            {aiState.question && (
+              <div className="mb-2 text-xs text-[var(--archive-ink-grey)]">
+                问题：{aiState.question}
+              </div>
+            )}
+            {(aiState.status === 'loading' || aiState.status === 'streaming') && aiState.content.length === 0 && (
+              <div className="text-[var(--archive-ink-grey)]">AI 正在思考...</div>
+            )}
+            {aiState.content && <div>{aiState.content}</div>}
+            {aiState.error && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                {aiState.error}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-black/10 bg-black/[0.02]">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(aiState.content);
+              }}
+              className="archive-action-btn !h-8 !px-3 text-xs"
+              disabled={!aiState.content}
+            >
+              复制结果
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (aiState.mode === 'summary') {
+                  void runAiAction('summary');
+                } else {
+                  void runAiAction('ask');
+                }
+              }}
+              className="archive-action-btn archive-action-btn-primary !h-8 !px-3 text-xs"
+            >
+              重试
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

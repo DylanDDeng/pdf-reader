@@ -1,8 +1,8 @@
-import { Highlighter, MessageSquare, Underline, X } from 'lucide-react';
+import { Bot, HelpCircle, Highlighter, MessageSquare, Underline, X } from 'lucide-react';
 import { HIGHLIGHT_COLORS, type HighlightColor } from '../../types/annotation';
 import { useState, useEffect, useRef } from 'react';
 
-export type AnnotationAction = 'highlight' | 'underline' | 'comment';
+export type AnnotationAction = 'highlight' | 'underline' | 'comment' | 'ai_summary' | 'ai_ask';
 
 interface SelectionToolbarProps {
   position: { x: number; y: number };
@@ -74,6 +74,11 @@ export function SelectionToolbar({
     if (action === 'highlight' || action === 'underline') {
       onAction(action);
       onClose();
+      return;
+    }
+
+    if (action === 'ai_summary' || action === 'ai_ask') {
+      onAction(action);
     }
   };
 
@@ -124,6 +129,24 @@ export function SelectionToolbar({
           title="添加批注（暂不可用）"
         >
           <MessageSquare className="w-4 h-4" />
+        </button>
+
+        <div className="w-px h-5 bg-slate-200 mx-0.5" />
+
+        <button
+          onClick={() => handleAction('ai_summary')}
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+          title="AI 总结选区"
+        >
+          <Bot className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={() => handleAction('ai_ask')}
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+          title="AI 问答"
+        >
+          <HelpCircle className="w-4 h-4" />
         </button>
 
         <div className="w-px h-5 bg-slate-200 mx-0.5" />

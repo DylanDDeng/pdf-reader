@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DefaultZoomMode, OpenFileLocationMode, ReaderSettings } from '../types/settings';
+import type { AiProvider, DefaultZoomMode, OpenFileLocationMode, ReaderSettings } from '../types/settings';
 
 const STORAGE_KEY = 'pdf-reader-settings';
 
@@ -7,6 +7,12 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   openFileLocation: 'last_read_page',
   defaultZoomMode: 'fit_width',
   arxivDownloadFolder: null,
+  aiEnabled: true,
+  aiProvider: 'openrouter',
+  openRouterApiKey: '',
+  openRouterModel: 'openai/gpt-4o-mini',
+  aiReasoningEnabled: true,
+  aiDailyUsageSoftLimit: 100,
 };
 
 function isOpenFileLocationMode(value: unknown): value is OpenFileLocationMode {
@@ -15,6 +21,10 @@ function isOpenFileLocationMode(value: unknown): value is OpenFileLocationMode {
 
 function isDefaultZoomMode(value: unknown): value is DefaultZoomMode {
   return value === 'fit_width' || value === 'fixed_100' || value === 'remember_last';
+}
+
+function isAiProvider(value: unknown): value is AiProvider {
+  return value === 'openrouter';
 }
 
 function loadSettings(): ReaderSettings {
@@ -39,6 +49,18 @@ function loadSettings(): ReaderSettings {
         typeof parsed.arxivDownloadFolder === 'string' && parsed.arxivDownloadFolder.trim().length > 0
           ? parsed.arxivDownloadFolder
           : null,
+      aiEnabled: typeof parsed.aiEnabled === 'boolean' ? parsed.aiEnabled : DEFAULT_SETTINGS.aiEnabled,
+      aiProvider: isAiProvider(parsed.aiProvider) ? parsed.aiProvider : DEFAULT_SETTINGS.aiProvider,
+      openRouterApiKey: typeof parsed.openRouterApiKey === 'string' ? parsed.openRouterApiKey : DEFAULT_SETTINGS.openRouterApiKey,
+      openRouterModel:
+        typeof parsed.openRouterModel === 'string' && parsed.openRouterModel.trim().length > 0
+          ? parsed.openRouterModel
+          : DEFAULT_SETTINGS.openRouterModel,
+      aiReasoningEnabled:
+        typeof parsed.aiReasoningEnabled === 'boolean' ? parsed.aiReasoningEnabled : DEFAULT_SETTINGS.aiReasoningEnabled,
+      aiDailyUsageSoftLimit: Number.isFinite(parsed.aiDailyUsageSoftLimit)
+        ? Math.max(1, Math.floor(parsed.aiDailyUsageSoftLimit ?? DEFAULT_SETTINGS.aiDailyUsageSoftLimit))
+        : DEFAULT_SETTINGS.aiDailyUsageSoftLimit,
     };
   } catch (error) {
     console.error('Failed to load reader settings:', error);
@@ -85,11 +107,37 @@ export function useReaderSettings() {
     });
   }, []);
 
+  const setAiEnabled = useCallback((enabled: boolean) => {
+    setSettings((prev) => (prev.aiEnabled === enabled ? prev : { ...prev, aiEnabled: enabled }));
+  }, []);
+
+  const setOpenRouterApiKey = useCallback((apiKey: string) => {
+    setSettings((prev) => (prev.openRouterApiKey === apiKey ? prev : { ...prev, openRouterApiKey: apiKey }));
+  }, []);
+
+  const setOpenRouterModel = useCallback((model: string) => {
+    setSettings((prev) => (prev.openRouterModel === model ? prev : { ...prev, openRouterModel: model }));
+  }, []);
+
+  const setAiReasoningEnabled = useCallback((enabled: boolean) => {
+    setSettings((prev) => (prev.aiReasoningEnabled === enabled ? prev : { ...prev, aiReasoningEnabled: enabled }));
+  }, []);
+
+  const setAiDailyUsageSoftLimit = useCallback((limit: number) => {
+    const normalized = Math.max(1, Math.floor(limit));
+    setSettings((prev) => (prev.aiDailyUsageSoftLimit === normalized ? prev : { ...prev, aiDailyUsageSoftLimit: normalized }));
+  }, []);
+
   return {
     settings,
     setSettings,
     setOpenFileLocation,
     setDefaultZoomMode,
     setArxivDownloadFolder,
+    setAiEnabled,
+    setOpenRouterApiKey,
+    setOpenRouterModel,
+    setAiReasoningEnabled,
+    setAiDailyUsageSoftLimit,
   };
 }

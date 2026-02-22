@@ -8,10 +8,12 @@ import { useTabs, type Tab } from './hooks/useTabs';
 import { useReaderSettings } from './hooks/useReaderSettings';
 import { useReadingProgress } from './hooks/useReadingProgress';
 import { useZoomMemory } from './hooks/useZoomMemory';
+import { useAiUsage } from './hooks/useAiUsage';
 import { getDocumentKey } from './utils/documentKey';
 import type { ScannedFile, ImportResult as ImportResultType } from './types/library';
 import type { ArxivImportOutcome } from './types/arxiv';
 import type { DefaultZoomMode } from './types/settings';
+import type { AiRuntimeConfig } from './types/ai';
 
 function App() {
   const [activeView, setActiveView] = useState<'library' | 'reader'>('library');
@@ -27,14 +29,43 @@ function App() {
     switchTab,
     updateTab,
   } = useTabs();
-  const { settings, setOpenFileLocation, setDefaultZoomMode, setArxivDownloadFolder } = useReaderSettings();
+  const {
+    settings,
+    setOpenFileLocation,
+    setDefaultZoomMode,
+    setArxivDownloadFolder,
+    setAiEnabled,
+    setOpenRouterApiKey,
+    setOpenRouterModel,
+    setAiReasoningEnabled,
+    setAiDailyUsageSoftLimit,
+  } = useReaderSettings();
   const { getLastPage, setLastPage } = useReadingProgress();
   const { getLastScale, setLastScale } = useZoomMemory();
+  const { usage: aiUsage, recordRequest: recordAiRequest, resetToday: resetAiUsage, syncToday: syncAiUsageDay } = useAiUsage();
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, tabs]
   );
+
+  const aiConfig = useMemo<AiRuntimeConfig>(() => ({
+    enabled: settings.aiEnabled,
+    provider: settings.aiProvider,
+    apiKey: settings.openRouterApiKey,
+    model: settings.openRouterModel,
+    reasoningEnabled: settings.aiReasoningEnabled,
+    dailyUsageSoftLimit: settings.aiDailyUsageSoftLimit,
+    todayRequestCount: aiUsage.requests,
+  }), [
+    aiUsage.requests,
+    settings.aiDailyUsageSoftLimit,
+    settings.aiEnabled,
+    settings.aiProvider,
+    settings.aiReasoningEnabled,
+    settings.openRouterApiKey,
+    settings.openRouterModel,
+  ]);
 
   // Use the library hook for managing PDF library
   const {
@@ -182,11 +213,16 @@ function App() {
     handleTabUpdate(activeTab.id, { zoomMode: 'custom', scale: rememberedScale });
   }, [activeTab, getLastScale, handleTabUpdate, setDefaultZoomMode]);
 
+  const handleOpenSettings = useCallback(() => {
+    syncAiUsageDay();
+    setIsSettingsOpen(true);
+  }, [syncAiUsageDay]);
+
   return (
     <div className="flex h-screen overflow-hidden archive-shell-bg">
       <Sidebar
         onImportFolder={handleImportFolder}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={handleOpenSettings}
         activeView={activeView}
         onViewChange={setActiveView}
         isCollapsed={isSidebarCollapsed}
@@ -216,6 +252,8 @@ function App() {
             onTabChange={switchTab}
             onTabClose={handleTabClose}
             onTabUpdate={handleTabUpdate}
+            aiConfig={aiConfig}
+            onAiRequestFinished={recordAiRequest}
           />
         )}
       </div>
@@ -223,10 +261,17 @@ function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         settings={settings}
+        aiUsage={aiUsage}
         onClose={() => setIsSettingsOpen(false)}
         onChangeOpenFileLocation={setOpenFileLocation}
         onChangeDefaultZoomMode={handleChangeDefaultZoomMode}
         onChangeArxivDownloadFolder={setArxivDownloadFolder}
+        onChangeAiEnabled={setAiEnabled}
+        onChangeOpenRouterApiKey={setOpenRouterApiKey}
+        onChangeOpenRouterModel={setOpenRouterModel}
+        onChangeAiReasoningEnabled={setAiReasoningEnabled}
+        onChangeAiDailyUsageSoftLimit={setAiDailyUsageSoftLimit}
+        onResetAiUsage={resetAiUsage}
       />
     </div>
   );

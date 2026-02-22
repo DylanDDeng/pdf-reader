@@ -5,10 +5,21 @@ import type { DefaultZoomMode, OpenFileLocationMode, ReaderSettings } from '../.
 interface SettingsModalProps {
   isOpen: boolean;
   settings: ReaderSettings;
+  aiUsage: {
+    date: string;
+    requests: number;
+    failures: number;
+  };
   onClose: () => void;
   onChangeOpenFileLocation: (mode: OpenFileLocationMode) => void;
   onChangeDefaultZoomMode: (mode: DefaultZoomMode) => void;
   onChangeArxivDownloadFolder: (folder: string | null) => void;
+  onChangeAiEnabled: (enabled: boolean) => void;
+  onChangeOpenRouterApiKey: (apiKey: string) => void;
+  onChangeOpenRouterModel: (model: string) => void;
+  onChangeAiReasoningEnabled: (enabled: boolean) => void;
+  onChangeAiDailyUsageSoftLimit: (limit: number) => void;
+  onResetAiUsage: () => void;
 }
 
 interface LocationOption {
@@ -57,10 +68,17 @@ const DEFAULT_ZOOM_OPTIONS: ZoomOption[] = [
 export function SettingsModal({
   isOpen,
   settings,
+  aiUsage,
   onClose,
   onChangeOpenFileLocation,
   onChangeDefaultZoomMode,
   onChangeArxivDownloadFolder,
+  onChangeAiEnabled,
+  onChangeOpenRouterApiKey,
+  onChangeOpenRouterModel,
+  onChangeAiReasoningEnabled,
+  onChangeAiDailyUsageSoftLimit,
+  onResetAiUsage,
 }: SettingsModalProps) {
   const handleBrowseArxivFolder = async () => {
     try {
@@ -217,6 +235,94 @@ export function SettingsModal({
                 Clear
               </button>
             </div>
+          </section>
+
+          <section className="archive-settings-section archive-settings-section-divider">
+            <h3 className="archive-settings-section-title">AI 助手（OpenRouter）</h3>
+            <p className="archive-settings-section-desc">
+              选中文本后可用 AI 总结和问答。默认开启 reasoning，可在下方调整。
+            </p>
+
+            <div className="archive-settings-options">
+              <button
+                type="button"
+                onClick={() => onChangeAiEnabled(!settings.aiEnabled)}
+                className={`archive-settings-option ${settings.aiEnabled ? 'is-active' : ''}`}
+              >
+                <span className="archive-settings-radio" aria-hidden>
+                  <span className="archive-settings-radio-dot" />
+                </span>
+                <span className="archive-settings-option-copy">
+                  <span className="archive-settings-option-title">启用 AI 功能</span>
+                  <span className="archive-settings-option-desc">关闭后将隐藏选区 AI 操作入口。</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeAiReasoningEnabled(!settings.aiReasoningEnabled)}
+                className={`archive-settings-option ${settings.aiReasoningEnabled ? 'is-active' : ''}`}
+              >
+                <span className="archive-settings-radio" aria-hidden>
+                  <span className="archive-settings-radio-dot" />
+                </span>
+                <span className="archive-settings-option-copy">
+                  <span className="archive-settings-option-title">启用 reasoning（默认开启）</span>
+                  <span className="archive-settings-option-desc">会提升复杂推理能力，但可能增加耗时和成本。</span>
+                </span>
+              </button>
+            </div>
+
+            <div className="archive-settings-folder-row">
+              <div className="archive-settings-folder-display" title={settings.openRouterApiKey ? '已配置' : '未配置'}>
+                <span className="text-black/60">OpenRouter API Key</span>
+              </div>
+              <input
+                type="password"
+                value={settings.openRouterApiKey}
+                onChange={(event) => onChangeOpenRouterApiKey(event.target.value)}
+                placeholder="sk-or-..."
+                className="archive-action-btn flex-1 min-w-0 !h-10 !justify-start !px-3 text-left font-mono text-xs"
+              />
+            </div>
+
+            <div className="archive-settings-folder-row">
+              <div className="archive-settings-folder-display" title="OpenRouter model id">
+                <span className="text-black/60">Model</span>
+              </div>
+              <input
+                type="text"
+                value={settings.openRouterModel}
+                onChange={(event) => onChangeOpenRouterModel(event.target.value)}
+                onBlur={(event) => {
+                  if (!event.target.value.trim()) {
+                    onChangeOpenRouterModel('openai/gpt-4o-mini');
+                  }
+                }}
+                placeholder="anthropic/claude-sonnet-4.6"
+                className="archive-action-btn flex-1 min-w-0 !h-10 !justify-start !px-3 text-left font-mono text-xs"
+              />
+            </div>
+
+            <div className="archive-settings-folder-row">
+              <div className="archive-settings-folder-display">
+                <span className="text-black/60">每日软提醒阈值</span>
+              </div>
+              <input
+                type="number"
+                min={1}
+                value={settings.aiDailyUsageSoftLimit}
+                onChange={(event) => onChangeAiDailyUsageSoftLimit(Number(event.target.value || 1))}
+                className="archive-action-btn w-28 !h-10 !justify-start !px-3 text-left font-mono text-xs"
+              />
+              <button type="button" onClick={onResetAiUsage} className="archive-action-btn">
+                重置今日计数
+              </button>
+            </div>
+
+            <p className="archive-settings-section-desc mt-2">
+              今日调用：{aiUsage.requests} 次（失败 {aiUsage.failures} 次，日期 {aiUsage.date}）
+            </p>
           </section>
         </div>
 
