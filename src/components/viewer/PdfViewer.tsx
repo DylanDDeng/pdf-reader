@@ -188,6 +188,7 @@ export function PdfViewer({
   });
 
   const aiAbortRef = useRef<AbortController | null>(null);
+  const aiStopRef = useRef(false);
 
   const destroyTextLayerTasks = useCallback(() => {
     textLayerTasksRef.current.forEach((task) => {
@@ -1431,6 +1432,7 @@ export function PdfViewer({
         ? `今日调用已达到 ${aiConfig.todayRequestCount} 次，超过提醒阈值 ${aiConfig.dailyUsageSoftLimit}。`
         : null;
 
+    aiStopRef.current = false;
     aiAbortRef.current?.abort();
     const controller = new AbortController();
     aiAbortRef.current = controller;
@@ -1482,11 +1484,12 @@ export function PdfViewer({
       onAiRequestFinished?.(true);
     } catch (error) {
       if (error instanceof AiServiceError && error.code === 'ABORTED') {
-        setAiState((prev) => ({
-          ...prev,
-          status: 'idle',
-          error: null,
-        }));
+        if (aiStopRef.current) {
+          aiStopRef.current = false;
+          setAiState((prev) => ({ ...prev, status: 'done' }));
+        } else {
+          setAiState((prev) => ({ ...prev, status: 'idle', error: null }));
+        }
         return;
       }
       setAiState((prev) => ({
@@ -1722,7 +1725,7 @@ export function PdfViewer({
               void runAiAction('ask');
             }
           }}
-          onStop={() => { aiAbortRef.current?.abort(); }}
+          onStop={() => { aiStopRef.current = true; aiAbortRef.current?.abort(); }}
         />
       )}
     </div>

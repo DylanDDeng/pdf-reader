@@ -81,6 +81,7 @@ export function Viewer({
   const previousTabCountRef = useRef(tabs.length);
   const tabDocRefs = useRef<Map<string, PDFDocumentProxy>>(new Map());
   const summaryAbortRef = useRef<AbortController | null>(null);
+  const summaryStopRef = useRef(false);
   const chatAbortRef = useRef<AbortController | null>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
@@ -442,6 +443,7 @@ export function Viewer({
       return;
     }
 
+    summaryStopRef.current = false;
     summaryAbortRef.current?.abort();
     const controller = new AbortController();
     summaryAbortRef.current = controller;
@@ -476,7 +478,12 @@ export function Viewer({
       onAiRequestFinished?.(true);
     } catch (error) {
       if (error instanceof AiServiceError && error.code === 'ABORTED') {
-        setSummaryState((prev) => ({ ...prev, status: 'idle', open: false }));
+        if (summaryStopRef.current) {
+          summaryStopRef.current = false;
+          setSummaryState((prev) => ({ ...prev, status: 'done' }));
+        } else {
+          setSummaryState((prev) => ({ ...prev, status: 'idle', open: false }));
+        }
         return;
       }
       setSummaryState((prev) => ({ ...prev, status: 'error', error: getAiErrorMessage(error) }));
@@ -497,6 +504,7 @@ export function Viewer({
       return;
     }
 
+    summaryStopRef.current = false;
     summaryAbortRef.current?.abort();
     const controller = new AbortController();
     summaryAbortRef.current = controller;
@@ -533,7 +541,12 @@ export function Viewer({
       onAiRequestFinished?.(true);
     } catch (error) {
       if (error instanceof AiServiceError && error.code === 'ABORTED') {
-        setSummaryState((prev) => ({ ...prev, status: 'idle', open: false }));
+        if (summaryStopRef.current) {
+          summaryStopRef.current = false;
+          setSummaryState((prev) => ({ ...prev, status: 'done' }));
+        } else {
+          setSummaryState((prev) => ({ ...prev, status: 'idle', open: false }));
+        }
         return;
       }
       setSummaryState((prev) => ({ ...prev, status: 'error', error: getAiErrorMessage(error) }));
@@ -859,7 +872,7 @@ export function Viewer({
                   void handleSummarizeDocument();
                 }
               }}
-              onStop={() => { summaryAbortRef.current?.abort(); }}
+              onStop={() => { summaryStopRef.current = true; summaryAbortRef.current?.abort(); }}
             />
           )}
 

@@ -10,7 +10,13 @@ export interface AiRuntimeConfig {
   todayRequestCount: number;
 }
 
-export type AiRequestMode = 'summary' | 'ask';
+export type AiRequestMode = 'summary' | 'ask' | 'summary_page' | 'summary_doc';
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 export type AiErrorCode =
   | 'AUTH_INVALID'
