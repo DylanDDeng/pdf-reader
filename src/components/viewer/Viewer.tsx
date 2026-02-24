@@ -7,11 +7,14 @@ import { PdfViewer, type AnnotationClickContext } from './PdfViewer';
 import { AnnotationPanel } from './AnnotationPanel';
 import { AiResultPanel } from './AiResultPanel';
 import { ChatPanel } from './ChatPanel';
+import { SearchBar } from './SearchBar';
 import type { Tab } from '../../hooks/useTabs';
 import type { Annotation, HighlightColor } from '../../types/annotation';
 import type { AiRuntimeConfig, ChatMessage } from '../../types/ai';
+import type { OutlineItem } from '../../utils/pdf';
 import { AiServiceError } from '../../types/ai';
 import { useAnnotations } from '../../hooks/useAnnotations';
+import { useSearch } from '../../hooks/useSearch';
 import { streamOpenRouterChatCompletion } from '../../services/aiService';
 import { extractPageText, extractDocumentText } from '../../utils/pdfTextExtract';
 
@@ -47,6 +50,8 @@ export function Viewer({
   onAiRequestFinished,
 }: ViewerProps) {
   const [tabPageCounts, setTabPageCounts] = useState<Record<string, number>>({});
+  const [tabOutlines, setTabOutlines] = useState<Record<string, OutlineItem[]>>({});
+  const [sidebarTab, setSidebarTab] = useState<'thumbnails' | 'outline'>('thumbnails');
   const [mountedTabIds, setMountedTabIds] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
@@ -83,8 +88,25 @@ export function Viewer({
   const summaryAbortRef = useRef<AbortController | null>(null);
   const summaryStopRef = useRef(false);
   const chatAbortRef = useRef<AbortController | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const pageInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
+
+  // Search hook - uses the active tab's PDFDocumentProxy
+  const activeDocRef = useRef<PDFDocumentProxy | null>(null);
+  activeDocRef.current = activeTab ? (tabDocRefs.current.get(activeTab.id) ?? null) : null;
+  const {
+    isSearchOpen,
+    query: searchQuery,
+    matches: searchMatches,
+    currentMatchIndex: searchMatchIndex,
+    openSearch,
+    closeSearch,
+    search: doSearch,
+    nextMatch,
+    prevMatch,
+  } = useSearch(activeDocRef);
 
   const fileId = activeTab?.annotationKey ?? null;
   const {
@@ -219,7 +241,8 @@ export function Viewer({
     summaryAbortRef.current?.abort();
     summaryAbortRef.current = null;
     setSummaryState((prev) => ({ ...prev, open: false, status: 'idle' }));
-  }, [activeTabId, clearFocusGuideAnimation]);
+    closeSearch();
+  }, [activeTabId, clearFocusGuideAnimation, closeSearch]);
 
   useEffect(() => {
     const updateViewportSize = () => {
@@ -260,6 +283,19 @@ export function Viewer({
       });
       return changed ? next : prev;
     });
+    setTabOutlines((prev) => {
+      const aliveIds = new Set(tabs.map((tab) => tab.id));
+      let changed = false;
+      const next: Record<string, OutlineItem[]> = {};
+      Object.entries(prev).forEach(([tabId, items]) => {
+        if (aliveIds.has(tabId)) {
+          next[tabId] = items;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
   }, [tabs]);
 
   useEffect(() => {
@@ -269,9 +305,13 @@ export function Viewer({
     previousTabCountRef.current = tabs.length;
   }, [tabs.length]);
 
-  const handleDocumentLoad = useCallback((tabId: string, pages: number) => {
+  const handleDocumentLoad = useCallback((tabId: string, pages: number, outline?: OutlineItem[]) => {
     const safePages = Math.max(1, Math.floor(pages || 1));
     setTabPageCounts((prev) => (prev[tabId] === safePages ? prev : { ...prev, [tabId]: safePages }));
+
+    if (outline) {
+      setTabOutlines((prev) => ({ ...prev, [tabId]: outline }));
+    }
 
     const current = tabs.find((tab) => tab.id === tabId)?.currentPage ?? 1;
     if (current > safePages) {
@@ -649,9 +689,39 @@ export function Viewer({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeTab) return;
 
+      const isMod = e.metaKey || e.ctrlKey;
+
+      // Cmd/Ctrl+F: open search (always intercept, even in inputs)
+      if (isMod && e.key === 'f') {
+        e.preventDefault();
+        openSearch();
+        return;
+      }
+
+      // Cmd/Ctrl+G: focus page input for quick jump
+      if (isMod && e.key === 'g') {
+        e.preventDefault();
+        pageInputRef.current?.focus();
+        pageInputRef.current?.select();
+        return;
+      }
+
+      // ESC: close search first, then other panels
+      if (e.key === 'Escape') {
+        if (isSearchOpen) {
+          e.preventDefault();
+          closeSearch();
+          return;
+        }
+        return;
+      }
+
+      // Skip remaining shortcuts when focused on input/textarea
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
+
+      const totalPages = tabPageCounts[activeTab.id] ?? 0;
 
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -668,12 +738,30 @@ export function Viewer({
       } else if (e.key === '0') {
         e.preventDefault();
         handleResetZoom();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        handlePageChange(1);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        if (totalPages > 0) handlePageChange(totalPages);
+      } else if (e.key === 'PageDown' || (e.key === ' ' && !e.shiftKey)) {
+        e.preventDefault();
+        const container = scrollContainerRef.current;
+        if (container) {
+          container.scrollBy({ top: container.clientHeight * 0.85, behavior: 'smooth' });
+        }
+      } else if (e.key === 'PageUp' || (e.key === ' ' && e.shiftKey)) {
+        e.preventDefault();
+        const container = scrollContainerRef.current;
+        if (container) {
+          container.scrollBy({ top: -container.clientHeight * 0.85, behavior: 'smooth' });
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, handlePrevPage, handleNextPage, handleZoomIn, handleZoomOut, handleResetZoom]);
+  }, [activeTab, handlePrevPage, handleNextPage, handleZoomIn, handleZoomOut, handleResetZoom, handlePageChange, tabPageCounts, isSearchOpen, openSearch, closeSearch]);
 
   if (tabs.length === 0) {
     return (
@@ -745,6 +833,9 @@ export function Viewer({
             showAnnotations={showAnnotations}
             eraseMode={eraseMode}
             showChat={showChat}
+            currentPage={activeTab.currentPage}
+            totalPages={tabPageCounts[activeTab.id] ?? 0}
+            onPageChange={handlePageChange}
             onToggleContents={() => setIsSidebarOpen((prev) => !prev)}
             onToggleAnnotations={handleToggleAnnotations}
             onToggleEraseMode={() => setEraseMode((prev) => !prev)}
@@ -754,6 +845,7 @@ export function Viewer({
             onSummarizePage={() => { void handleSummarizePage(); }}
             onSummarizeDocument={() => { void handleSummarizeDocument(); }}
             onToggleChat={handleToggleChat}
+            pageInputRef={pageInputRef}
           />
 
           <div className="flex-1 flex overflow-hidden min-h-0 min-w-0">
@@ -776,6 +868,9 @@ export function Viewer({
                           totalPages={tabTotalPages}
                           onPageChange={(page) => handlePageChangeForTab(tab.id, page)}
                           onBack={() => onTabClose(tab.id)}
+                          sidebarTab={sidebarTab}
+                          onSidebarTabChange={setSidebarTab}
+                          outline={tabOutlines[tab.id] ?? []}
                         />
                       )}
 
@@ -795,7 +890,7 @@ export function Viewer({
                             onTabUpdate(tab.id, { scale: nextScale });
                           }}
                           annotations={tabAnnotations}
-                          onDocumentLoad={(pages) => handleDocumentLoad(tab.id, pages)}
+                          onDocumentLoad={(pages, outline) => handleDocumentLoad(tab.id, pages, outline)}
                           onPageChange={(page) => handlePageChangeForTab(tab.id, page)}
                           onAddHighlight={handleAddHighlight}
                           onAddUnderline={handleAddUnderline}
@@ -806,7 +901,25 @@ export function Viewer({
                           aiConfig={aiConfig}
                           onAiRequestFinished={onAiRequestFinished}
                           onDocumentReady={(doc) => handleDocumentReady(tab.id, doc)}
+                          scrollContainerRef={isActive ? scrollContainerRef : undefined}
+                          searchQuery={isActive ? searchQuery : undefined}
+                          searchActiveMatch={
+                            isActive && searchMatchIndex >= 0 && searchMatches[searchMatchIndex]
+                              ? searchMatches[searchMatchIndex]
+                              : undefined
+                          }
                         />
+                        {isActive && isSearchOpen && (
+                          <SearchBar
+                            query={searchQuery}
+                            onSearch={doSearch}
+                            onNext={nextMatch}
+                            onPrev={prevMatch}
+                            onClose={closeSearch}
+                            currentMatch={searchMatchIndex}
+                            totalMatches={searchMatches.length}
+                          />
+                        )}
                       </div>
                     </div>
                   );

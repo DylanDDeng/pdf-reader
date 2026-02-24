@@ -142,6 +142,84 @@ input:focus-visible {
   background: rgba(59, 130, 246, 0.25);
 }
 
+/* Search highlights */
+.search-highlight {
+  background: rgba(255, 213, 0, 0.4);
+  border-radius: 2px;
+  color: transparent;
+}
+
+.search-highlight-active {
+  background: rgba(255, 150, 0, 0.6);
+  border-radius: 2px;
+  color: transparent;
+}
+
+/* Search bar */
+.archive-search-bar {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  padding: 4px 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.archive-search-bar-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--archive-ink-black);
+  width: 180px;
+  padding: 4px 6px;
+}
+
+.archive-search-bar-input::placeholder {
+  color: var(--archive-ink-grey);
+  opacity: 0.6;
+}
+
+.archive-search-bar-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--archive-ink-grey);
+  white-space: nowrap;
+  padding: 0 4px;
+  min-width: 40px;
+  text-align: center;
+}
+
+.archive-search-bar-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: var(--archive-ink-black);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.archive-search-bar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.archive-search-bar-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 .textLayer br::selection {
   background: transparent;
 }
@@ -556,6 +634,104 @@ input:focus-visible {
   padding-right: 8px;
 }
 
+.archive-sidebar-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.archive-sidebar-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--archive-ink-grey);
+  padding: 7px 0;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.archive-sidebar-tab:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--archive-ink-black);
+}
+
+.archive-sidebar-tab.is-active {
+  background: var(--archive-ink-black);
+  color: #fff;
+}
+
+.archive-outline-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.archive-outline-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--archive-ink-black);
+  padding: 5px 8px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.archive-outline-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.archive-outline-item.is-active {
+  background: rgba(166, 75, 59, 0.1);
+  color: var(--archive-rust);
+  font-weight: 600;
+}
+
+.archive-outline-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.archive-outline-toggle:hover {
+  opacity: 1;
+}
+
+.archive-outline-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-outline-page {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.45;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
 .archive-page-thumb {
   width: 100%;
   border: 1px solid rgba(0, 0, 0, 0.1);
@@ -697,6 +873,46 @@ input:focus-visible {
   color: var(--archive-ink-black);
   cursor: pointer;
   padding: 0 2px;
+}
+
+.archive-page-label-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--archive-ink-black);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.archive-page-label-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.archive-page-input {
+  width: 52px;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 4px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--archive-ink-black);
+  padding: 4px 6px;
+  text-align: center;
+  outline: none;
+}
+
+.archive-page-input:focus {
+  border-color: var(--archive-rust);
+  box-shadow: 0 0 0 2px rgba(166, 75, 59, 0.15);
 }
 
 .archive-toolbar-divider {

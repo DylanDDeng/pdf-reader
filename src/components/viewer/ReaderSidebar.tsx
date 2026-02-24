@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { loadPdfDocument } from '../../utils/pdf';
+import type { OutlineItem } from '../../utils/pdf';
+import { OutlineTree } from './OutlineTree';
 
 interface ReaderSidebarProps {
   file: File | string;
@@ -8,6 +10,9 @@ interface ReaderSidebarProps {
   totalPages: number;
   onPageChange: (page: number) => void;
   onBack: () => void;
+  sidebarTab: 'thumbnails' | 'outline';
+  onSidebarTabChange: (tab: 'thumbnails' | 'outline') => void;
+  outline: OutlineItem[];
 }
 
 export function ReaderSidebar({
@@ -16,6 +21,9 @@ export function ReaderSidebar({
   totalPages,
   onPageChange,
   onBack,
+  sidebarTab,
+  onSidebarTabChange,
+  outline,
 }: ReaderSidebarProps) {
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const renderSeqRef = useRef(0);
@@ -198,31 +206,53 @@ export function ReaderSidebar({
         <span>DocFlow / Back</span>
       </button>
 
-      <div className="archive-page-thumb-list">
-        {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
-          const active = currentPage === pageNum;
-          return (
-            <button
-              key={pageNum}
-              onClick={() => onPageChange(pageNum)}
-              className={`archive-page-thumb ${active ? 'active' : ''}`}
-            >
-              <div className="archive-page-thumb-stage">
-                <canvas
-                  ref={(node) => setCanvasRef(pageNum, node)}
-                  className={`archive-page-thumb-canvas ${renderedThumbs[pageNum] ? 'is-ready' : ''}`}
-                />
-                {!renderedThumbs[pageNum] && (
-                  <div className="archive-page-thumb-content" />
-                )}
-              </div>
-              <span className="archive-page-label archive-caps" title={resolvePageLabel(pageNum)}>
-                {resolvePageLabel(pageNum)}
-              </span>
-            </button>
-          );
-        })}
+      <div className="archive-sidebar-tabs">
+        <button
+          className={`archive-sidebar-tab ${sidebarTab === 'thumbnails' ? 'is-active' : ''}`}
+          onClick={() => onSidebarTabChange('thumbnails')}
+        >
+          缩略图
+        </button>
+        <button
+          className={`archive-sidebar-tab ${sidebarTab === 'outline' ? 'is-active' : ''}`}
+          onClick={() => onSidebarTabChange('outline')}
+        >
+          目录
+        </button>
       </div>
+
+      <div className="archive-page-thumb-list" style={{ display: sidebarTab === 'thumbnails' ? undefined : 'none' }}>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+            const active = currentPage === pageNum;
+            return (
+              <button
+                key={pageNum}
+                onClick={() => onPageChange(pageNum)}
+                className={`archive-page-thumb ${active ? 'active' : ''}`}
+              >
+                <div className="archive-page-thumb-stage">
+                  <canvas
+                    ref={(node) => setCanvasRef(pageNum, node)}
+                    className={`archive-page-thumb-canvas ${renderedThumbs[pageNum] ? 'is-ready' : ''}`}
+                  />
+                  {!renderedThumbs[pageNum] && (
+                    <div className="archive-page-thumb-content" />
+                  )}
+                </div>
+                <span className="archive-page-label archive-caps" title={resolvePageLabel(pageNum)}>
+                  {resolvePageLabel(pageNum)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      {sidebarTab === 'outline' && (
+        <OutlineTree
+          outline={outline}
+          currentPage={currentPage}
+          onPageChange={onPageChange}
+        />
+      )}
     </aside>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { PanelLeft, MousePointer2, Highlighter, MessageSquare, Eraser, Bot, MessageCircle, ChevronDown, FileText, BookOpen } from 'lucide-react';
+import { PanelLeft, MousePointer2, Highlighter, MessageSquare, Eraser, Bot, MessageCircle, ChevronDown, FileText, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ReaderToolbarProps {
   scale: number;
@@ -9,6 +9,9 @@ interface ReaderToolbarProps {
   showAnnotations: boolean;
   eraseMode: boolean;
   showChat: boolean;
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
   onToggleContents: () => void;
   onToggleAnnotations: () => void;
   onToggleEraseMode: () => void;
@@ -18,6 +21,7 @@ interface ReaderToolbarProps {
   onSummarizePage: () => void;
   onSummarizeDocument: () => void;
   onToggleChat: () => void;
+  pageInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 export function ReaderToolbar({
@@ -28,6 +32,9 @@ export function ReaderToolbar({
   showAnnotations,
   eraseMode,
   showChat,
+  currentPage,
+  totalPages,
+  onPageChange,
   onToggleContents,
   onToggleAnnotations,
   onToggleEraseMode,
@@ -37,10 +44,47 @@ export function ReaderToolbar({
   onSummarizePage,
   onSummarizeDocument,
   onToggleChat,
+  pageInputRef,
 }: ReaderToolbarProps) {
   const selectActive = !eraseMode;
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const [isEditingPage, setIsEditingPage] = useState(false);
+  const [pageInputValue, setPageInputValue] = useState('');
   const aiMenuRef = useRef<HTMLDivElement>(null);
+  const internalInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePageLabelClick = () => {
+    setPageInputValue(String(currentPage));
+    setIsEditingPage(true);
+  };
+
+  useEffect(() => {
+    if (isEditingPage) {
+      const el = pageInputRef?.current ?? internalInputRef.current;
+      el?.focus();
+      el?.select();
+    }
+  }, [isEditingPage, pageInputRef]);
+
+  const commitPageInput = () => {
+    const parsed = parseInt(pageInputValue, 10);
+    if (!isNaN(parsed) && totalPages > 0) {
+      onPageChange(Math.max(1, Math.min(parsed, totalPages)));
+    }
+    setIsEditingPage(false);
+  };
+
+  const cancelPageInput = () => {
+    setIsEditingPage(false);
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) onPageChange(currentPage - 1);
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) onPageChange(currentPage + 1);
+  };
 
   useEffect(() => {
     if (!aiMenuOpen) return;
@@ -141,6 +185,58 @@ export function ReaderToolbar({
         >
           <MessageCircle className="w-4 h-4" />
         </button>
+      </div>
+
+      <div className="archive-tool-group">
+        <button
+          onClick={handlePrevPage}
+          disabled={currentPage <= 1}
+          className="archive-tool-btn archive-tool-btn-icon"
+          title="上一页"
+          aria-label="上一页"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+
+        {isEditingPage ? (
+          <input
+            ref={(el) => {
+              (internalInputRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
+              if (pageInputRef && 'current' in pageInputRef) {
+                (pageInputRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
+              }
+            }}
+            type="text"
+            className="archive-page-input"
+            value={pageInputValue}
+            onChange={(e) => setPageInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitPageInput(); }
+              if (e.key === 'Escape') { e.preventDefault(); cancelPageInput(); }
+            }}
+            onBlur={cancelPageInput}
+          />
+        ) : (
+          <button
+            className="archive-page-label-btn"
+            onClick={handlePageLabelClick}
+            title="点击跳转到指定页"
+          >
+            {currentPage} / {totalPages || '–'}
+          </button>
+        )}
+
+        <button
+          onClick={handleNextPage}
+          disabled={currentPage >= totalPages}
+          className="archive-tool-btn archive-tool-btn-icon"
+          title="下一页"
+          aria-label="下一页"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+
+        <span className="archive-toolbar-divider" />
       </div>
 
       <div className="archive-tool-group">

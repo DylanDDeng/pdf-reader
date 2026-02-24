@@ -44,6 +44,9 @@ interface PdfViewerProps {
   aiConfig: AiRuntimeConfig;
   onAiRequestFinished?: (success: boolean) => void;
   onDocumentReady?: (doc: PDFDocumentProxy | null) => void;
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
+  searchQuery?: string;
+  searchActiveMatch?: { pageNumber: number; index: number; length: number };
 }
 
 interface PageRefs {
@@ -126,6 +129,9 @@ export function PdfViewer({
   aiConfig,
   onAiRequestFinished,
   onDocumentReady,
+  scrollContainerRef,
+  searchQuery,
+  searchActiveMatch,
 }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onDocumentLoadRef = useRef(onDocumentLoad);
@@ -1585,9 +1591,133 @@ export function PdfViewer({
     }
   }, [deleteMode, resetSelectionState]);
 
+  // Search highlighting: mark matching text in text layers
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Clear all existing search highlights
+    container.querySelectorAll('mark.search-highlight').forEach((mark) => {
+      const parent = mark.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(mark.textContent || ''), mark);
+        parent.normalize();
+      }
+    });
+
+    if (!searchQuery?.trim()) return;
+
+    const lowerQuery = searchQuery.toLowerCase();
+
+    // Find all text layer spans and highlight matches
+    const textLayers = container.querySelectorAll('.textLayer');
+    textLayers.forEach((layer) => {
+      const spans = layer.querySelectorAll('span');
+      spans.forEach((span) => {
+        const text = span.textContent || '';
+        const lowerText = text.toLowerCase();
+        if (!lowerText.includes(lowerQuery)) return;
+
+        const frag = document.createDocumentFragment();
+        let lastIdx = 0;
+        let pos = 0;
+
+        while (true) {
+          const idx = lowerText.indexOf(lowerQuery, pos);
+          if (idx === -1) break;
+
+          if (idx > lastIdx) {
+            frag.appendChild(document.createTextNode(text.slice(lastIdx, idx)));
+          }
+
+          const mark = document.createElement('mark');
+          mark.className = 'search-highlight';
+          mark.textContent = text.slice(idx, idx + searchQuery.length);
+          frag.appendChild(mark);
+
+          lastIdx = idx + searchQuery.length;
+          pos = idx + 1;
+        }
+
+        if (lastIdx < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+        }
+
+        if (lastIdx > 0) {
+          span.textContent = '';
+          span.appendChild(frag);
+        }
+      });
+    });
+  }, [searchQuery, scale, pageCount]);
+
+  // Highlight active search match and scroll to it
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Remove previous active highlight
+    container.querySelectorAll('.search-highlight-active').forEach((el) => {
+      el.classList.remove('search-highlight-active');
+    });
+
+    if (!searchActiveMatch || !searchQuery?.trim()) return;
+
+    // Find the page card for the active match
+    const pageCards = container.querySelectorAll('[data-page-number]');
+    let targetCard: Element | null = null;
+    pageCards.forEach((card) => {
+      if (Number(card.getAttribute('data-page-number')) === searchActiveMatch.pageNumber) {
+        targetCard = card;
+      }
+    });
+
+    if (!targetCard) return;
+
+    // Find all marks in this page and activate the right one
+    const marks = (targetCard as Element).querySelectorAll('mark.search-highlight');
+    if (marks.length > 0) {
+      // Find the match index within this page
+      let pageMatchIdx = 0;
+      if (searchActiveMatch.index > 0) {
+        // Count how many characters precede this match in the page text
+        let charCount = 0;
+        const spans = (targetCard as Element).querySelectorAll('.textLayer span');
+        let found = false;
+        for (const span of spans) {
+          const spanMarks = span.querySelectorAll('mark.search-highlight');
+          for (const m of spanMarks) {
+            if (charCount <= searchActiveMatch.index && !found) {
+              // This is approximately the right mark
+              if (pageMatchIdx < marks.length) {
+                found = true;
+                break;
+              }
+            }
+            pageMatchIdx++;
+            charCount += (m.textContent?.length ?? 0);
+          }
+          if (found) break;
+          charCount += (span.textContent?.length ?? 0);
+        }
+      }
+
+      const activeMark = marks[Math.min(pageMatchIdx, marks.length - 1)];
+      if (activeMark) {
+        activeMark.classList.add('search-highlight-active');
+        activeMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [searchActiveMatch, searchQuery]);
+
   return (
     <div
-      ref={containerRef}
+      ref={(el) => {
+        (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+        if (scrollContainerRef && 'current' in scrollContainerRef) {
+          (scrollContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+        }
+      }}
       className="archive-reader-viewport h-full w-full overflow-y-auto overflow-x-auto relative"
       style={{ scrollbarGutter: 'stable both-edges' }}
     >
