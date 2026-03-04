@@ -200,7 +200,7 @@ export function ReaderSidebar({
   }, [file, renderThumbPage, totalPages]);
 
   return (
-    <aside className="archive-reader-sidebar">
+    <aside className="archive-reader-sidebar select-none">
       <button onClick={onBack} className="archive-reader-brand" title="返回库视图">
         <span className="archive-reader-brand-icon" />
         <span>DocFlow / Back</span>

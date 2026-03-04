@@ -45,7 +45,7 @@ export function Sidebar({
 
   return (
     <aside
-      className={`archive-library shrink-0 overflow-hidden flex flex-col transition-all duration-300 border-r border-black/10 border-dashed bg-white/55 backdrop-blur-[2px] ${
+      className={`archive-library select-none shrink-0 overflow-hidden flex flex-col transition-all duration-300 border-r border-black/10 border-dashed bg-white/55 backdrop-blur-[2px] ${
         isCollapsed ? 'w-20 px-3 py-6' : 'w-[260px] px-6 py-8'
       }`}
     >
